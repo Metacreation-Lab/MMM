@@ -39,14 +39,14 @@ from .utils_tests import MIDI_PATH
 # TO INFILL: []...[CONTEXT_SIZE BARS][REGION_TO_INFILL][CONTEXT_SIZE BARS]...[]
 # ...
 # TRACK n : []...[CONTEXT_SIZE BARS][INFILLING CONTEXT][CONTEXT_SIZE BARS]...[]
-CONTEXT_SIZE = 4
+CONTEXT_SIZE = 40
 
 # Number of random infilling to perform per MIDI file.
-NUM_INFILLINGS_PER_TRACK = 1
+NUM_INFILLINGS_PER_TRACK = 10
 NUM_GENERATIONS_PER_INFILLING = 1
 
 # Number of bars to infill in a track
-NUM_BARS_TO_INFILL = 4
+NUM_BARS_TO_INFILL = 20
 """
 TOKENIZER_PARAMS = {
     "pitch_range": (21, 109),
@@ -83,16 +83,18 @@ config = TokenizerConfig(**TOKENIZER_PARAMS)
 )
 @pytest.mark.parametrize("input_midi_path", MIDI_PATH)
 # @pytest.mark.parametrize("context_size", CONTEXT_SIZE)
-@pytest.mark.skip(reason="This is a generation test! Skipping...")
+# pytest.mark.skip(reason="This is a generation test! Skipping...")
 def test_generate(tokenizer: MMM, input_midi_path: str | Path):
     print(f"[INFO::test_generate] Testing MIDI file: {input_midi_path} ")
 
     # Creating model
     model = MistralForCausalLM.from_pretrained(
-        Path(__file__).parent.parent / "models" / "checkpoint-87000",
+        #Path(__file__).parent.parent / "models" / "checkpoint-87000",
+        "C:\\Users\\rizzo\\Desktop\\TESI\\dependencies_test\\MMM\\models\\checkpoint-87000",
         use_safetensors=True,
     )
 
+    print(model.config)
     # Creating generation config
     gen_config = GenerationConfig(
         num_beams=NUM_BEAMS,
@@ -136,7 +138,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
         num_bars = len(bars_ticks)
 
         bar_idx_infill_start = random.randint(
-            CONTEXT_SIZE, num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL
+            CONTEXT_SIZE, num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL - 1
         )
 
         bar_tick_end = bars_ticks[
@@ -171,7 +173,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
             "name": str(input_midi_path.name),
             "track_idx": track_idx,
             "start_bar_idx": bar_idx_infill_start,
-            "end_bar_idx": bar_idx_infill_start + 4,
+            "end_bar_idx": bar_idx_infill_start + NUM_BARS_TO_INFILL,
         }
 
         j = 0
@@ -198,7 +200,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
 
             _.dump_midi(
                 output_folder_path / f"track{track_idx}_"
-                f"infill_bars{bar_idx_infill_start}_{bar_idx_infill_start+4}"
+                f"infill_bars{bar_idx_infill_start}_{bar_idx_infill_start+NUM_BARS_TO_INFILL}"
                 f"_generationtime_{end_time - start_time}.midi.mid"
             )
 
