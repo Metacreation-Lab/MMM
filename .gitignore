@@ -1,8 +1,8 @@
 /docs/public
 /tests/test_real_time/
 /tests/tests_output
-/models
-.MMM/
+runs/models
 .idea
 __pycache__
 **/__pycache__
+/.MMM

@@ -141,7 +141,7 @@ NUM_INFERENCES_TEST = MAX_SEQ_LEN  # for tests after training, saving the result
 # GENERATION CONFIG (for validation and tests)
 NUM_BEAMS = 1
 TEMPERATURE_SAMPLING = 1.0
-REPETITION_PENALTY = 1.2
+REPETITION_PENALTY = 1.0
 TOP_K = 20
 TOP_P = 0.95
 EPSILON_CUTOFF = None

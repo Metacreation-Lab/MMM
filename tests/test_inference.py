@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import symusic
 from miditok import MMM
-from transformers import GenerationConfig, MistralForCausalLM
+from transformers import GenerationConfig, MistralForCausalLM, AutoModelForCausalLM
 
 from mmm import InferenceConfig, generate
 from scripts.utils.constants import (
@@ -39,42 +39,25 @@ from .utils_tests import MIDI_PATH
 # TO INFILL: []...[CONTEXT_SIZE BARS][REGION_TO_INFILL][CONTEXT_SIZE BARS]...[]
 # ...
 # TRACK n : []...[CONTEXT_SIZE BARS][INFILLING CONTEXT][CONTEXT_SIZE BARS]...[]
-CONTEXT_SIZE = 40
+CONTEXT_SIZE = 4
 
 # Number of random infilling to perform per MIDI file.
 NUM_INFILLINGS_PER_TRACK = 10
-NUM_GENERATIONS_PER_INFILLING = 1
+NUM_GENERATIONS_PER_INFILLING = 3
 
 # Number of bars to infill in a track
-NUM_BARS_TO_INFILL = 20
-"""
-TOKENIZER_PARAMS = {
-    "pitch_range": (21, 109),
-    "beat_res": {(0, 1): 12, (1, 2): 4, (2, 4): 2, (4, 8): 1},
-    "num_velocities": 24,
-    "special_tokens": [
-        "PAD",
-        "BOS",
-        "EOS",
-        "Infill_Bar",  # Indicates a bar to be filled in a seq
-        "Infill_Track",  # Used in seq2seq to instruct the decoder to gen a new track
-        "FillBar_Start",  # Start of the portion to infill (containing n bars)
-        "FillBar_End",  # Ends the portion to infill
-    ],
-    "use_chords": False,
-    "use_rests": False,
-    "use_tempos": True,
-    "use_time_signatures": True,
-    "use_pitch_intervals": False,  # cannot be used as extracting tokens in data loading
-    "use_programs": True,
-    "num_tempos": 48,
-    "tempo_range": (50, 200),
-    "programs": list(range(-1, 127)),
-    "base_tokenizer": "REMI",
-}
-config = TokenizerConfig(**TOKENIZER_PARAMS)
-"""
+NUM_BARS_TO_INFILL = 16
 
+MODEL_PATH = Path("runs/models/MISTRAL_87000")
+MIDI_OUTPUT_FOLDER = (Path(__file__).parent
+        / "tests_output"
+        / "mistral"
+        / "final_tests"
+        / f"temp{TEMPERATURE_SAMPLING}"
+          f"_rep{REPETITION_PENALTY}"
+          f"_topK{TOP_K}_topP{TOP_P}"
+          f"num_bars_infill{NUM_BARS_TO_INFILL}"
+        / "TEST_3")
 
 @pytest.mark.parametrize(
     "tokenizer",
@@ -87,12 +70,7 @@ config = TokenizerConfig(**TOKENIZER_PARAMS)
 def test_generate(tokenizer: MMM, input_midi_path: str | Path):
     print(f"[INFO::test_generate] Testing MIDI file: {input_midi_path} ")
 
-    # Creating model
-    model = MistralForCausalLM.from_pretrained(
-        #Path(__file__).parent.parent / "models" / "checkpoint-87000",
-        "C:\\Users\\rizzo\\Desktop\\TESI\\dependencies_test\\MMM\\models\\checkpoint-87000",
-        use_safetensors=True,
-    )
+    model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
 
     print(model.config)
     # Creating generation config
@@ -106,6 +84,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
         eta_cutoff=ETA_CUTOFF,
         max_new_tokens=MAX_NEW_TOKENS,
         max_length=MAX_LENGTH,
+        do_sample = True
     )
 
     # Get number of tracks and number of bars of the MIDI track
@@ -116,10 +95,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
     print(f"[INFO::test_generate] Number of tracks: {num_tracks} ")
 
     output_folder_path = (
-        Path(__file__).parent
-        / "tests_output"
-        / "87k"
-        / "TEST_DEBUG"
+        MIDI_OUTPUT_FOLDER
         / f"test_{input_midi_path.name!s}"
     )
 
@@ -132,31 +108,53 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
     # To be added to JSON file
     infillings = []
     while i < NUM_INFILLINGS_PER_TRACK:
+
+        # Select random track index to infill
         track_idx = random.randint(0, num_tracks - 1)
+        #track_idx = 4
 
         bars_ticks = tokens[track_idx]._ticks_bars
         num_bars = len(bars_ticks)
+        #bar_idx_infill_start = 150
 
+        # Select random portion of the track to infill
         bar_idx_infill_start = random.randint(
             CONTEXT_SIZE, num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL - 1
         )
 
-        bar_tick_end = bars_ticks[
+        # Compute stuff to discard infillings when we have no context!
+        bar_left_context_start = bars_ticks[
+            bar_idx_infill_start - CONTEXT_SIZE
+        ]
+        bar_infilling_start = bars_ticks[bar_idx_infill_start]
+        bar_infilling_end = bars_ticks[bar_idx_infill_start + CONTEXT_SIZE]
+        bar_right_context_end = bars_ticks[
             bar_idx_infill_start + NUM_BARS_TO_INFILL + CONTEXT_SIZE
         ]
 
         times = np.array([event.time for event in tokens[track_idx].events])
-        token_idx_end = np.nonzero(times >= bar_tick_end)[0]
-
-        if len(token_idx_end) == 0:
+        tokens_left_context = np.nonzero((times >= bar_left_context_start) & (times <= bar_infilling_start))[0]
+        tokens_infilling = np.nonzero((times >= bar_infilling_start) & (times <= bar_infilling_end))[0]
+        tokens_right_context = np.nonzero((times >= bar_infilling_end) & (times <= bar_right_context_end))[0]
+        if len(tokens_left_context) == 0 and len(tokens_right_context) == 0:
             print(
                 f"[WARNING::test_generate] Ignoring infilling of bars "
                 f"{bar_idx_infill_start} - "
                 f"{bar_idx_infill_start + NUM_BARS_TO_INFILL} on track {track_idx}"
+                " because we have no context around the infilling region"
             )
             continue
 
+        if len(tokens_infilling) == 0:
+            print(
+                f"[WARNING::test_generate] Infilling region"
+                f"{bar_idx_infill_start} - "
+                f"{bar_idx_infill_start + NUM_BARS_TO_INFILL} on track {track_idx}"
+                "has no notes!"
+            )
+
         inference_config = InferenceConfig(
+            CONTEXT_SIZE,
             {
                 track_idx: [
                     (
@@ -203,10 +201,10 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
                 f"infill_bars{bar_idx_infill_start}_{bar_idx_infill_start+NUM_BARS_TO_INFILL}"
                 f"_generationtime_{end_time - start_time}.midi.mid"
             )
+            infillings.append(entry)
 
             j += 1
 
-        infillings.append(entry)
 
         i += 1
 
