@@ -245,10 +245,17 @@ class DummyDataset(DatasetMIDI):
             ]
 
             # Generate a random number between 1 and 20
-            infill_section_num_bars = random.randint(1, self.max_bar_infilling_length)
+            #infill_section_num_bars = random.randint(1, self.max_bar_infilling_length)
 
-            if infill_section_num_bars > len(bars_ticks):
-                infill_section_num_bars = random.randint(1, 4)
+            #if infill_section_num_bars > len(bars_ticks):
+            #    infill_section_num_bars = random.randint(1, 4)
+
+            infill_section_num_bars = max(
+                1,
+                round(
+                    len(bars_ticks) * uniform(0.1,0.4)
+                ),
+            )
 
             if infill_section_num_bars == len(bars_ticks):
                 # Special case where the portion to mask == the whole music
@@ -560,6 +567,19 @@ class DummyDataset(DatasetMIDI):
         with open('output.txt', 'w') as file:
             for item in tokseq_tokens:
                 file.write(str(item) + "\n")
+
+        # [DEBUG] Reconstruct MIDI file from toksequence
+        tokseq_tokens = np.array(tokseq.tokens)
+        indices = np.where(tokseq_tokens == "Infill_Bar")[0]
+        fill_bar_start_idx = np.where(tokseq_tokens == "FillBar_Start")[0][0]
+        list_seqs = []
+        list_seqs.append(tokseq[:indices[0]])
+        list_seqs.append(tokseq[fill_bar_start_idx+1:-1])
+        list_seqs.append(tokseq[indices[-1]+1:])
+        midi_tok_seq = concat_tokseq(list_seqs)
+
+        score_ = self.tokenizer._tokens_to_score(midi_tok_seq)
+        score_.dump_midi("output_reconstructed.mid")
 
         return tokseq, decoder_input
 

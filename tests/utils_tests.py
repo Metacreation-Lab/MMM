@@ -12,15 +12,22 @@ HERE = Path(__file__).parent
 MIDI_PATHS = list((HERE / "midis").glob("**/*.mid"))
 MIDI_PATH = [
     HERE / "midis" / "I Gotta Feeling.mid",
-    #HERE / "midis" / "MIDI_test.mid",
+    HERE / "midis" / "Nocturne_in_F_minor,_Op._55_No._1.mid",
+    HERE / "midis" / "The Beatles - Here Comes the Sun.mid",
+    HERE / "midis" / "Felicita.mid",
+    HERE / "midis" / "youre only lonely L.mid",
+    #HERE / "midis" / "Les Yeux Revolvers.mid"
+
+    #HERE / "midis" / "Girls Just Want to Have Fun.mid",
+    # HERE / "midis" / "Rick-Astley-Never-Gonna-Give-You-Up.mid",
+    # HERE / "midis" / "Amore_bello.mid",
+    # HERE / "midis" / "MIDI_test.mid",
     # HERE / "midis" / "Funkytown.mid",
     # HERE / "midis" / "Les Yeux Revolvers.mid",
-    # HERE / "midis" / "Girls Just Want to Have Fun.mid",
     # HERE / "midis" / "Shut Up.mid",
     # HERE / "midis" / "All The Small Things.mid",
     # HERE / "midis" / "In Too Deep.mid",
     # HERE / "midis" / "Queen - Bohemian Rhapsody.mid",
-    # HERE / "midis" / "Rick-Astley-Never-Gonna-Give-You-Up.mid",
     # HERE / "midis" / "DAFT PUNK.Around the world.mid",
 ]
 

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import symusic
 from miditok import MMM
+from symusic import Score
 from transformers import GenerationConfig, MistralForCausalLM, AutoModelForCausalLM
 
 from mmm import InferenceConfig, generate
@@ -42,22 +43,23 @@ from .utils_tests import MIDI_PATH
 CONTEXT_SIZE = 4
 
 # Number of random infilling to perform per MIDI file.
-NUM_INFILLINGS_PER_TRACK = 10
+NUM_INFILLINGS_PER_MIDI_FILE = 67
 NUM_GENERATIONS_PER_INFILLING = 3
 
 # Number of bars to infill in a track
-NUM_BARS_TO_INFILL = 16
+NUM_BARS_TO_INFILL = 4
 
-MODEL_PATH = Path("runs/models/MISTRAL_87000")
+DRUM_GENERATION = False
+
+MODEL_PATH = Path("runs/models/MISTRAL_123000")
 MIDI_OUTPUT_FOLDER = (Path(__file__).parent
         / "tests_output"
+        / "MEETING0121"
         / "mistral"
-        / "final_tests"
         / f"temp{TEMPERATURE_SAMPLING}"
           f"_rep{REPETITION_PENALTY}"
           f"_topK{TOP_K}_topP{TOP_P}"
-          f"num_bars_infill{NUM_BARS_TO_INFILL}"
-        / "TEST_3")
+          f"num_bars_infill{NUM_BARS_TO_INFILL}_context_{CONTEXT_SIZE}")
 
 @pytest.mark.parametrize(
     "tokenizer",
@@ -107,20 +109,32 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
     i = 0
     # To be added to JSON file
     infillings = []
-    while i < NUM_INFILLINGS_PER_TRACK:
+    while i < NUM_INFILLINGS_PER_MIDI_FILE:
 
         # Select random track index to infill
-        track_idx = random.randint(0, num_tracks - 1)
-        #track_idx = 4
+        track_idx = random.randint(0, num_tracks-1)
+        #track_idx = 1
+        # TODO: just find the drum track index and use that, no
+        # need to do this garbage
+        if DRUM_GENERATION:
+            if tokens[track_idx].tokens[1] != "Program_-1":
+                continue
+        else:
+            # If not generating drums, skip until we sample
+            # a non drum track index
+            if tokens[track_idx].tokens[1] == "Program_-1":
+                continue
+        if len(score.tracks[track_idx].notes) == 0:
+            continue
 
         bars_ticks = tokens[track_idx]._ticks_bars
         num_bars = len(bars_ticks)
-        #bar_idx_infill_start = 150
+        #bar_idx_infill_start = 88
 
         # Select random portion of the track to infill
         bar_idx_infill_start = random.randint(
-            CONTEXT_SIZE, num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL - 1
-        )
+            CONTEXT_SIZE // 4, (num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL - 1) // 4
+        ) * 4
 
         # Compute stuff to discard infillings when we have no context!
         bar_left_context_start = bars_ticks[
@@ -133,10 +147,13 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
         ]
 
         times = np.array([event.time for event in tokens[track_idx].events])
-        tokens_left_context = np.nonzero((times >= bar_left_context_start) & (times <= bar_infilling_start))[0]
+        types = np.array([event.type_ for event in tokens[track_idx].events])
+        tokens_left_context_idxs = np.nonzero((times >= bar_left_context_start) & (times <= bar_infilling_start))[0]
+        tokens_left_context_types = set(types[tokens_left_context_idxs])
         tokens_infilling = np.nonzero((times >= bar_infilling_start) & (times <= bar_infilling_end))[0]
-        tokens_right_context = np.nonzero((times >= bar_infilling_end) & (times <= bar_right_context_end))[0]
-        if len(tokens_left_context) == 0 and len(tokens_right_context) == 0:
+        tokens_right_context_idxs = np.nonzero((times >= bar_infilling_end) & (times <= bar_right_context_end))[0]
+        tokens_right_context_types = set(types[tokens_right_context_idxs])
+        if "Pitch" not in tokens_left_context_types or "Pitch" not in tokens_right_context_types:
             print(
                 f"[WARNING::test_generate] Ignoring infilling of bars "
                 f"{bar_idx_infill_start} - "
@@ -175,6 +192,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
         }
 
         j = 0
+        successful = True
         while j < NUM_GENERATIONS_PER_INFILLING:
             print(
                 f"[INFO::test_generate] Generation #{j} for track {track_idx} "
@@ -183,30 +201,37 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
             )
 
             start_time = time.time()
+            try:
+                _ = generate(
+                    model,
+                    tokenizer,
+                    inference_config,
+                    input_midi_path,
+                    {"generation_config": gen_config},
+                    input_tokens=tokens
+                )
+            except Exception as e:
+                print(f"An error occurred during generation: {e}")
+                successful = False
+                break
 
-            _ = generate(
-                model,
-                tokenizer,
-                inference_config,
-                input_midi_path,
-                {"generation_config": gen_config},
-            )
 
             end_time = time.time()
 
             print(f"[INFO::test_generate] ...Done in {end_time - start_time} seconds")
 
             _.dump_midi(
-                output_folder_path / f"track{track_idx}_"
+                output_folder_path / f"{input_midi_path.stem}_track{track_idx}_"
                 f"infill_bars{bar_idx_infill_start}_{bar_idx_infill_start+NUM_BARS_TO_INFILL}"
-                f"_generationtime_{end_time - start_time}.midi.mid"
+                f"_context_{CONTEXT_SIZE}"
+                f"_generationtime_{end_time - start_time}.mid"
             )
             infillings.append(entry)
 
             j += 1
 
-
-        i += 1
+        if successful:
+            i += 1
 
     json_data = {"generation_config": gen_config_dict, "infillings": infillings}
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import time
 import warnings
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -27,6 +29,7 @@ def generate(
     inference_config: InferenceConfig,
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
+    input_tokens =None
 ) -> Score:
     """
     Use the model to generate new music content.
@@ -53,7 +56,7 @@ def generate(
     # Infill bars
     if inference_config.infilling:
         score = generate_infilling(
-            model, tokenizer, inference_config, score, logits_processor, generate_kwargs
+            model, tokenizer, inference_config, score, logits_processor, generate_kwargs, deepcopy(input_tokens)
         )
 
     # Generate new tracks
@@ -134,6 +137,7 @@ def generate_infilling(
     score: Score,
     logits_processor: StopLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
+    input_tokens = None
 ) -> Score:
     """
     Generate a new portion of a ``symusic.Score``.
@@ -163,7 +167,7 @@ def generate_infilling(
     tracks_to_infill = inference_config.bars_to_generate.keys()
 
     start_time = time.time()
-    input_tokens = tokenizer.encode(score, concatenate_track_sequences=False)
+    #input_tokens = tokenizer.encode(score, concatenate_track_sequences=False)
 
     """
     Just for debugging purposes
@@ -341,8 +345,11 @@ def _adapt_prompt_for_bar_infilling(
 
     start_bar_idx = subset_bars_to_infill[0]
     end_bar_idx = subset_bars_to_infill[1]
-
-    bars_ticks = tokens[track_idx]._ticks_bars
+    try:
+        bars_ticks = tokens[track_idx]._ticks_bars
+    except AttributeError as e:
+        # Code to handle the exception
+        print(f"An error occurred: {e}")
     bar_tick_start = bars_ticks[start_bar_idx]
     bar_tick_end = bars_ticks[end_bar_idx]
 
@@ -392,7 +399,6 @@ def _adapt_prompt_for_bar_infilling(
 
     output_toksequence = TokSequence(are_ids_encoded=True)
     for i in range(len(tokens)):
-    #for i in range(4):
         if i == track_idx:
             output_toksequence += toksequence_to_infill
             continue
@@ -419,11 +425,16 @@ def _adapt_prompt_for_bar_infilling(
                 context_token_end_idx = len(tokens[track_idx]) - 1
             else:
                 context_token_end_idx = context_token_end_idx[0]
-        output_toksequence += (
-            tokens[i][:2]
-            + tokens[i][context_token_start_idx:context_token_end_idx]
-            + tokens[i][-1:]
-        )
+
+        # Add the section to the context only if it is not empty
+        sliced_tokens = tokens[i][context_token_start_idx:context_token_end_idx]
+        pattern = r"Pitch_\d+"
+        if any(re.match(pattern, token) for token in sliced_tokens.tokens):
+            output_toksequence += (
+                tokens[i][:2]
+                + sliced_tokens
+                + tokens[i][-1:]
+            )
 
     output_toksequence.ids.append(tokenizer.vocab["FillBar_Start"])
     output_toksequence.tokens.append("FillBar_Start")
