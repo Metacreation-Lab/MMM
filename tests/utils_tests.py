@@ -9,20 +9,7 @@ from symusic import Score
 from torch import LongTensor
 
 HERE = Path(__file__).parent
-MIDI_PATHS = list((HERE / "midis").glob("**/*.mid"))
-MIDI_PATH = [
-    HERE / "midis" / "I Gotta Feeling.mid",
-    HERE / "midis" / "when sunny gets blue-kar mw.mid",
-    HERE / "midis" / "bobsled asw.mid",
-    HERE / "midis" / "boogie band wk.mid",
-    HERE / "midis" / "fiddlin pete ps4.mid",
-    HERE / "midis" / "herbs jazz fantasy hh ps.mid",
-    HERE / "midis" / "romantic dreams pw.mid",
-    HERE / "midis" / "sinatra coming home dw.mid",
-    HERE / "midis" / "tomahawk chant song dp.mid",
-    HERE / "midis" / "uist tramping song rw.mid",
-    HERE / "midis" / "vienna nites dc.mid",
-]
+MIDI_PATHS = list((HERE / "test_midis").glob("**/*.mid"))
 
 # Used to test limit cases
 # MIDI_PATH = HERE / "test_real_time" / "midis" / "4_bar.mid"
