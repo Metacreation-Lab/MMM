@@ -40,21 +40,22 @@ from .utils_tests import MIDI_PATH
 # TO INFILL: []...[CONTEXT_SIZE BARS][REGION_TO_INFILL][CONTEXT_SIZE BARS]...[]
 # ...
 # TRACK n : []...[CONTEXT_SIZE BARS][INFILLING CONTEXT][CONTEXT_SIZE BARS]...[]
-CONTEXT_SIZE = 4
+# MusIAC uses 6 bars as context size!
+CONTEXT_SIZE = 0
 
 # Number of random infilling to perform per MIDI file.
-NUM_INFILLINGS_PER_MIDI_FILE = 67
-NUM_GENERATIONS_PER_INFILLING = 3
+NUM_INFILLINGS_PER_MIDI_FILE = 50
+NUM_GENERATIONS_PER_INFILLING = 1
 
 # Number of bars to infill in a track
-NUM_BARS_TO_INFILL = 4
+NUM_BARS_TO_INFILL = 8
 
 DRUM_GENERATION = False
 
 MODEL_PATH = Path("runs/models/MISTRAL_123000")
 MIDI_OUTPUT_FOLDER = (Path(__file__).parent
         / "tests_output"
-        / "MEETING0121"
+        / "FINAL_TESTS"
         / "mistral"
         / f"temp{TEMPERATURE_SAMPLING}"
           f"_rep{REPETITION_PENALTY}"
@@ -113,7 +114,6 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
 
         # Select random track index to infill
         track_idx = random.randint(0, num_tracks-1)
-        #track_idx = 1
         # TODO: just find the drum track index and use that, no
         # need to do this garbage
         if DRUM_GENERATION:
@@ -124,8 +124,8 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
             # a non drum track index
             if tokens[track_idx].tokens[1] == "Program_-1":
                 continue
-        if len(score.tracks[track_idx].notes) == 0:
-            continue
+        #if len(score.tracks[track_idx].notes) == 0:
+        #    continue
 
         bars_ticks = tokens[track_idx]._ticks_bars
         num_bars = len(bars_ticks)
@@ -224,7 +224,7 @@ def test_generate(tokenizer: MMM, input_midi_path: str | Path):
                 output_folder_path / f"{input_midi_path.stem}_track{track_idx}_"
                 f"infill_bars{bar_idx_infill_start}_{bar_idx_infill_start+NUM_BARS_TO_INFILL}"
                 f"_context_{CONTEXT_SIZE}"
-                f"_generationtime_{end_time - start_time}.mid"
+                f"_generationtime_{end_time - start_time}_{i}{j}.mid"
             )
             infillings.append(entry)
 

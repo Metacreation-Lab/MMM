@@ -280,8 +280,12 @@ def infill_bars(
         )[0].numpy()
 
         end_time = time.time()
-        print("[INFO::infill_bars] Time spent for generation: ", end_time - start_time)
+        generation_time = end_time - start_time
+        print("[INFO::infill_bars] Time spent for generation: ", generation_time)
         # print("Time spent in logits processor ", logits_processor.total_time)
+
+        #with open("output.txt", "a") as f:
+        #    f.write(f"{number}\n")
 
         start_time = time.time()
 
