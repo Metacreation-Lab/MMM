@@ -6,6 +6,8 @@ import random
 import time
 from pathlib import Path
 
+import torch.cuda as cuda
+
 import numpy as np
 from miditok import MMM
 from symusic import Score
@@ -61,7 +63,7 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         bar_idx_infill_start = num_bars - NUM_BARS_TO_INFILL
     else:
         bar_idx_infill_start = random.randint(
-            CONTEXT_SIZE // 4, (num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL) // 4
+            CONTEXT_SIZE // 4, (num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL - 1) // 4
         ) * 4
     
     # Compute stuff to discard infillings when we have no context!
@@ -69,7 +71,7 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         bar_idx_infill_start - CONTEXT_SIZE
     ]
     bar_infilling_start = bars_ticks[bar_idx_infill_start]
-    bar_infilling_end = bars_ticks[bar_idx_infill_start + CONTEXT_SIZE]
+    bar_infilling_end = bars_ticks[bar_idx_infill_start + NUM_BARS_TO_INFILL]
 
     if not END_INFILLING:
         bar_right_context_end = bars_ticks[
@@ -85,8 +87,12 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         tokens_right_context_idxs = np.nonzero((times >= bar_infilling_end) & (times <= bar_right_context_end))[0]
         tokens_right_context_types = set(types[tokens_right_context_idxs])
     
+    pitch_token = "Pitch"
+    if DRUM_GENERATION:
+        pitch_token = "PitchDrum"
+    
     if END_INFILLING:
-        if "Pitch" not in tokens_right_context_types:
+        if pitch_token not in tokens_right_context_types:
             print(
                 f"[WARNING::test_generate] Ignoring infilling of bars "
                 f"{bar_idx_infill_start} - "
@@ -94,11 +100,12 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
                 " because we have no context around the infilling region"
             )
             return False
-    elif "Pitch" not in tokens_left_context_types or "Pitch" not in tokens_right_context_types:
+    elif pitch_token not in tokens_left_context_types or pitch_token not in tokens_right_context_types:
         print(
             f"[WARNING::test_generate] Ignoring infilling of bars "
             f"{bar_idx_infill_start} - "
             f"{bar_idx_infill_start + NUM_BARS_TO_INFILL} on track {track_idx}"
+            f"on file {input_midi_path}"
             " because we have no context around the infilling region"
         )
         return False
@@ -180,15 +187,25 @@ if __name__ == "__main__":
     END_INFILLING = args.end_infilling
 
     MODEL_PATH = Path("runs/models/MISTRAL_123000")
+
+    drum_flag = ""
+    if DRUM_GENERATION:
+        drum_flag = "drums"
+
     MIDI_OUTPUT_FOLDER = (Path(__file__).parent
                           / "output"
                           / f"temp{TEMPERATURE_SAMPLING}"
                             f"_rep{REPETITION_PENALTY}"
                             f"_topK{TOP_K}_topP{TOP_P}"
-                            f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}")
+                            f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}_{drum_flag}")
 
     tokenizer = MMM(params=Path(__file__).parent.parent / "runs" / "tokenizer.json")
-    model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
+
+    if cuda.is_available():
+        print("CUDA AVAILABLE!")
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, device_map="auto")
+    else:
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
 
     gen_config = GenerationConfig(
         num_beams=NUM_BEAMS,
