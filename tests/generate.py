@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import random
 import time
 from pathlib import Path
 
 import numpy as np
-import pytest
-import symusic
 from miditok import MMM
 from symusic import Score
 from transformers import GenerationConfig, MistralForCausalLM, AutoModelForCausalLM
@@ -27,24 +24,20 @@ from scripts.utils.constants import (
     TOP_P,
 )
 
-from .utils_tests import MIDI_PATHS
+from tests.utils_tests import MIDI_PATHS
 
 MODEL_PATH = Path("runs/models/MISTRAL_123000")
-MIDI_OUTPUT_FOLDER = (Path(__file__).parent
-        / f"temp{TEMPERATURE_SAMPLING}"
-          f"_rep{REPETITION_PENALTY}"
-          f"_topK{TOP_K}_topP{TOP_P}"
-          f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}")
+MIDI_OUTPUT_FOLDER = None
 
 def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path):
 
     MIDI_OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
     # Get number of tracks and number of bars of the MIDI track
-    score = symusic.Score(input_midi_path)
+    score = Score(input_midi_path)
     tokens = tokenizer.encode(score, concatenate_track_sequences=False)
 
-    gen_config_dict = vars(gen_config)
+    num_tracks = len(tokens)
 
     # Select random track index to infill
     track_idx = random.randint(0, num_tracks-1)
@@ -134,6 +127,8 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         )
 
     try:
+        start_time = time.time()
+
         _ = generate(
             model,
             tokenizer,
@@ -142,16 +137,20 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
             {"generation_config": gen_config},
             input_tokens=tokens
         )
+
+        end_time = time.time()
     except Exception as e:
         print(f"An error occurred during generation: {e}")
         return False
 
     _.dump_midi(
-            output_folder_path / f"{input_midi_path.stem}_track{track_idx}_"
+            MIDI_OUTPUT_FOLDER / f"{input_midi_path.stem}_track{track_idx}_"
             f"infill_bars{bar_idx_infill_start}_{bar_idx_infill_start+NUM_BARS_TO_INFILL}"
             f"_context_{CONTEXT_SIZE}"
             f"_generationtime_{end_time - start_time}.mid"
         )
+
+    return True
 
 CONTEXT_SIZE = None
 
@@ -179,6 +178,14 @@ if __name__ == "__main__":
     CONTEXT_SIZE = args.context
     DRUM_GENERATION = args.drums
     END_INFILLING = args.end_infilling
+
+    MODEL_PATH = Path("runs/models/MISTRAL_123000")
+    MIDI_OUTPUT_FOLDER = (Path(__file__).parent
+                          / "output"
+                          / f"temp{TEMPERATURE_SAMPLING}"
+                            f"_rep{REPETITION_PENALTY}"
+                            f"_topK{TOP_K}_topP{TOP_P}"
+                            f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}")
 
     tokenizer = MMM(params=Path(__file__).parent.parent / "runs" / "tokenizer.json")
     model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
