@@ -45,9 +45,11 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
     track_idx = random.randint(0, num_tracks-1)
 
     if DRUM_GENERATION:
-        while tokens[track_idx].tokens[1] != "Program_-1":
-            track_idx = random.randint(0, num_tracks-1)
-            continue
+        programs = [tokens[idx].tokens[1] for idx in range(num_tracks)]
+        if "Program_-1" not in programs:
+            return False
+        else:
+            track_idx = programs.index("Program_-1")
     else:
         # If not generating drums, skip until we sample
         # a non drum track index
@@ -65,15 +67,16 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         bar_idx_infill_start = random.randint(
             CONTEXT_SIZE // 4, (num_bars - CONTEXT_SIZE - NUM_BARS_TO_INFILL - 1) // 4
         ) * 4
-    
+
     # Compute stuff to discard infillings when we have no context!
     bar_left_context_start = bars_ticks[
         bar_idx_infill_start - CONTEXT_SIZE
     ]
     bar_infilling_start = bars_ticks[bar_idx_infill_start]
-    bar_infilling_end = bars_ticks[bar_idx_infill_start + NUM_BARS_TO_INFILL]
 
     if not END_INFILLING:
+        bar_infilling_end = bars_ticks[bar_idx_infill_start + NUM_BARS_TO_INFILL]
+
         bar_right_context_end = bars_ticks[
             bar_idx_infill_start + NUM_BARS_TO_INFILL + CONTEXT_SIZE
         ]
@@ -82,7 +85,10 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
     types = np.array([event.type_ for event in tokens[track_idx].events])
     tokens_left_context_idxs = np.nonzero((times >= bar_left_context_start) & (times <= bar_infilling_start))[0]
     tokens_left_context_types = set(types[tokens_left_context_idxs])
-    tokens_infilling = np.nonzero((times >= bar_infilling_start) & (times <= bar_infilling_end))[0]
+    if END_INFILLING:
+        tokens_infilling = np.nonzero(times >= bar_infilling_start)[0]
+    else:
+        tokens_infilling = np.nonzero((times >= bar_infilling_start) & (times <= bar_infilling_end))[0]
     if not END_INFILLING:
         tokens_right_context_idxs = np.nonzero((times >= bar_infilling_end) & (times <= bar_right_context_end))[0]
         tokens_right_context_types = set(types[tokens_right_context_idxs])
@@ -92,7 +98,7 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         pitch_token = "PitchDrum"
     
     if END_INFILLING:
-        if pitch_token not in tokens_right_context_types:
+        if pitch_token not in tokens_left_context_types:
             print(
                 f"[WARNING::test_generate] Ignoring infilling of bars "
                 f"{bar_idx_infill_start} - "
@@ -167,6 +173,8 @@ DRUM_GENERATION = False
 
 END_INFILLING = False
 
+DEBUG = True
+
 if __name__ == "__main__":
 
     import argparse
@@ -188,16 +196,19 @@ if __name__ == "__main__":
 
     MODEL_PATH = Path("runs/models/MISTRAL_123000")
 
-    drum_flag = ""
+    additional_flags = "_"
     if DRUM_GENERATION:
-        drum_flag = "drums"
+        additional_flags += "drums"
+    if END_INFILLING:
+        additional_flags += "endinfilling"
+
 
     MIDI_OUTPUT_FOLDER = (Path(__file__).parent
                           / "output"
                           / f"temp{TEMPERATURE_SAMPLING}"
                             f"_rep{REPETITION_PENALTY}"
                             f"_topK{TOP_K}_topP{TOP_P}"
-                            f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}_{drum_flag}")
+                            f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}{additional_flags}")
 
     tokenizer = MMM(params=Path(__file__).parent.parent / "runs" / "tokenizer.json")
 

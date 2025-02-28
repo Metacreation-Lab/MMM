@@ -308,7 +308,6 @@ def infill_bars(
             bar_none_token_idxs[0] : bar_none_token_idxs[-1]
         ]
 
-        tokenizer.decode_token_ids(tokens[track_idx])
         tokens[track_idx].ids[token_start_idx:token_end_idx] = generated_tokens.ids
         tokens[track_idx].tokens = tokenizer._ids_to_tokens(tokens[track_idx].ids)
 
@@ -345,46 +344,51 @@ def _adapt_prompt_for_bar_infilling(
 
     # Decode BPE tokens: this is necessary to put <INFILL_BAR> tokens
     # at the right place
-    tokenizer.decode_token_ids(tokens[track_idx])
+    tokenizer.decode_token_ids(tokens)
 
     start_bar_idx = subset_bars_to_infill[0]
     end_bar_idx = subset_bars_to_infill[1]
-    try:
-        bars_ticks = tokens[track_idx]._ticks_bars
-    except AttributeError as e:
-        # Code to handle the exception
-        print(f"An error occurred: {e}")
-    bar_tick_start = bars_ticks[start_bar_idx]
-    bar_tick_end = bars_ticks[end_bar_idx]
+
+    bars_ticks = tokens[track_idx]._ticks_bars
+    num_bars = len(tokens[track_idx]._ticks_bars)
 
     times = np.array([event.time for event in tokens[track_idx].events])
 
-    token_idx_start = np.nonzero(times >= bar_tick_start)[0][0]
+    #### Infilling tokens ####
 
-    token_idx_end = np.nonzero(times >= bar_tick_end)[0][0]
+    token_idx_start = np.nonzero(times >= bars_ticks[start_bar_idx])[0][0]
 
-    # Context
-    num_bars = len(tokens[track_idx]._ticks_bars)
-    infilling_region_length = end_bar_idx - start_bar_idx
-
-    # If the remaining bars are less than the context specified, take
-    # everything as context
-    if num_bars - infilling_region_length < 2*context_length:
-        context_token_start_idx = 2 #Skip Track_Start and Program tokens
-        context_token_end_idx = len(tokens[track_idx])
+    # In this case, infilling is done until the end of the track
+    if end_bar_idx >= num_bars:
+        token_idx_end = len(tokens[track_idx]) - 1
     else:
-        if start_bar_idx - context_length < 0:
-            context_token_start_idx = 0
-        else:
-            context_token_start_idx = np.nonzero(
-                times >= bars_ticks[start_bar_idx - context_length]
-            )[0][0]
-        if end_bar_idx + context_length >= num_bars - 1:
+        token_idx_end = np.nonzero(times >= bars_ticks[end_bar_idx])[0][0]
+
+
+    ##### Infilling Context#####
+
+    # If the number of bars available as context in the left
+    # is less than context length
+    if start_bar_idx - context_length < 0:
+        context_token_start_idx = 2
+    else:
+        context_token_start_idx = np.nonzero(
+            times >= bars_ticks[start_bar_idx - context_length]
+        )[0][0]
+
+    # Take right context
+    if end_bar_idx < num_bars:
+        # If the number of bars available as context in the right
+        # is less than context length
+        if end_bar_idx + context_length > num_bars - 1:
             context_token_end_idx = len(tokens[track_idx]) - 1
         else:
             context_token_end_idx = np.nonzero(
                 times >= bars_ticks[end_bar_idx + context_length]
             )[0][0]
+    # Only left context (aka END INFILLING)
+    else:
+        context_token_end_idx = -1
 
     seq_before = (
         tokens[track_idx][:2]
@@ -398,14 +402,17 @@ def _adapt_prompt_for_bar_infilling(
     toksequence_to_infill.ids.append(tokenizer.vocab["Track_End"])
     toksequence_to_infill.tokens.append("Track_End")
 
-    # Encode into BPE tokens
-    tokenizer.encode_token_ids(toksequence_to_infill)
+    output_toksequence = TokSequence(are_ids_encoded=False)
 
-    output_toksequence = TokSequence(are_ids_encoded=True)
+    ###### Context for other tracks #####
     for i in range(len(tokens)):
         if i == track_idx:
             output_toksequence += toksequence_to_infill
             continue
+
+        #with open("model_prompt_tokens.txt", "w") as file:
+        #    for token in output_toksequence.tokens:
+        #        file.write(token + "\n")
 
         times = np.array([event.time for event in tokens[i].events])
         if start_bar_idx - context_length < 0:
@@ -415,7 +422,7 @@ def _adapt_prompt_for_bar_infilling(
                 times >= bars_ticks[start_bar_idx - context_length]
             )[0][0]
         if end_bar_idx + context_length >= num_bars - 1:
-            context_token_end_idx = len(tokens[track_idx]) - 1
+            context_token_end_idx = len(tokens[i]) - 1
         else:
             # TODO: number of bars of some tracks computed through
             #   miditok is not always right, meaning that the list
@@ -426,13 +433,14 @@ def _adapt_prompt_for_bar_infilling(
             )[0]
             # In that case, we just take the last token as the end of context
             if len(context_token_end_idx) == 0:
-                context_token_end_idx = len(tokens[track_idx]) - 1
+                context_token_end_idx = len(tokens[i]) - 1
             else:
                 context_token_end_idx = context_token_end_idx[0]
 
         # Add the section to the context only if it is not empty
         sliced_tokens = tokens[i][context_token_start_idx:context_token_end_idx]
-        pattern = r"Pitch_\d+"
+
+        pattern = r"Pitch"
         if any(re.match(pattern, token) for token in sliced_tokens.tokens):
             output_toksequence += (
                 tokens[i][:2]
@@ -448,8 +456,11 @@ def _adapt_prompt_for_bar_infilling(
         output_toksequence.ids.append(tokenizer.vocab[control])
         output_toksequence.tokens.append(control)
 
+    # Encode into BPE tokens
+    tokenizer.encode_token_ids(output_toksequence)
 
     #Just for debugging purposes
+
     with open("model_prompt_tokens.txt", "w") as file:
         bar_n = 0
         track_n = 0
