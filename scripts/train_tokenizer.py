@@ -44,7 +44,7 @@ class TokTrainingIterator:
         """
         # Load and tokenize file
         try:
-            score = Score.from_midi(self.dataset[idx]["music"]["bytes"])
+            score = Score.from_midi(self.dataset[idx]["music"])
         except SCORE_LOADING_EXCEPTION:
             return []
 
@@ -106,10 +106,10 @@ class TokTrainingIterator:
         """
         return self.tokenize_sample(idx)
 
-    def __iter__(self) -> TokTrainingIterator:  # noqa:D105
+    def __iter__(self) -> TokTrainingIterator:
         return self
 
-    def __next__(self) -> list[str]:  # noqa:D105
+    def __next__(self) -> list[str]:
         if self.__iter_count >= len(self):
             self.__iter_count = 0
             raise StopIteration
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     set_seed(mmm_mistral.seed)
 
     # Train the tokenizer
-    dataset_ = mmm_mistral.create_dataset()["train"]
+    dataset_ = mmm_mistral.create_dataset_from_parquet()["train"]
     dataset_.shuffle()
     dataset_ = mmm_mistral.preprocess_dataset(dataset_).select(
         list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))

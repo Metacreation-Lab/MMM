@@ -124,7 +124,7 @@ class Baseline(ABC):
 
         :return: path of the tokenizer's configuration file.
         """
-        return self.run_path.parent / "tokenizer.json"
+        return self.run_path.parent / "tokenizer_with_acs.json"
 
     @property
     def dataset_path(self) -> Path:

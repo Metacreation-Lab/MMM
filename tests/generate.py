@@ -1,17 +1,15 @@
 """Tests for MMM inference."""
 
-from __future__ import annotations
-
 import random
 import time
+import traceback
 from pathlib import Path
 
-import torch.cuda as cuda
-
 import numpy as np
+import torch.cuda as cuda
 from miditok import MMM
 from symusic import Score
-from transformers import GenerationConfig, MistralForCausalLM, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, GenerationConfig
 
 from mmm import InferenceConfig, generate
 from scripts.utils.constants import (
@@ -25,13 +23,13 @@ from scripts.utils.constants import (
     TOP_K,
     TOP_P,
 )
-
 from tests.utils_tests import MIDI_PATHS
 
-MODEL_PATH = Path("runs/models/MISTRAL_123000")
-MIDI_OUTPUT_FOLDER = None
 
-def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path):
+def test_generate(tokenizer: MMM,
+                  model: AutoModelForCausalLM,
+                  gen_config: GenerationConfig,
+                  input_midi_path: str | Path):
 
     MIDI_OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
@@ -48,8 +46,7 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         programs = [tokens[idx].tokens[1] for idx in range(num_tracks)]
         if "Program_-1" not in programs:
             return False
-        else:
-            track_idx = programs.index("Program_-1")
+        track_idx = programs.index("Program_-1")
     else:
         # If not generating drums, skip until we sample
         # a non drum track index
@@ -83,20 +80,23 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
 
     times = np.array([event.time for event in tokens[track_idx].events])
     types = np.array([event.type_ for event in tokens[track_idx].events])
-    tokens_left_context_idxs = np.nonzero((times >= bar_left_context_start) & (times <= bar_infilling_start))[0]
+    tokens_left_context_idxs = np.nonzero((times >= bar_left_context_start) &
+                                          (times <= bar_infilling_start))[0]
     tokens_left_context_types = set(types[tokens_left_context_idxs])
     if END_INFILLING:
         tokens_infilling = np.nonzero(times >= bar_infilling_start)[0]
     else:
-        tokens_infilling = np.nonzero((times >= bar_infilling_start) & (times <= bar_infilling_end))[0]
+        tokens_infilling = np.nonzero((times >= bar_infilling_start) &
+                                      (times <= bar_infilling_end))[0]
     if not END_INFILLING:
-        tokens_right_context_idxs = np.nonzero((times >= bar_infilling_end) & (times <= bar_right_context_end))[0]
+        tokens_right_context_idxs = np.nonzero((times >= bar_infilling_end) &
+                                               (times <= bar_right_context_end))[0]
         tokens_right_context_types = set(types[tokens_right_context_idxs])
-    
+
     pitch_token = "Pitch"
     if DRUM_GENERATION:
         pitch_token = "PitchDrum"
-    
+
     if END_INFILLING:
         if pitch_token not in tokens_left_context_types:
             print(
@@ -106,7 +106,8 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
                 " because we have no context around the infilling region"
             )
             return False
-    elif pitch_token not in tokens_left_context_types or pitch_token not in tokens_right_context_types:
+    elif (pitch_token not in tokens_left_context_types or
+          pitch_token not in tokens_right_context_types):
         print(
             f"[WARNING::test_generate] Ignoring infilling of bars "
             f"{bar_idx_infill_start} - "
@@ -152,8 +153,9 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
         )
 
         end_time = time.time()
-    except Exception as e:
-        print(f"An error occurred during generation: {e}")
+    except Exception as e: # noqa: BLE001
+        print(f"An unexpected error occurred during generation: {e}")
+        traceback.print_exc()  # full stack trace
         return False
 
     _.dump_midi(
@@ -165,6 +167,8 @@ def test_generate(tokenizer: MMM, model, gen_config, input_midi_path: str | Path
 
     return True
 
+MODEL_PATH = Path("runs/models/MISTRAL_123000")
+
 CONTEXT_SIZE = None
 
 NUM_BARS_TO_INFILL = None
@@ -175,16 +179,27 @@ END_INFILLING = False
 
 DEBUG = True
 
+MIDI_OUTPUT_FOLDER = None
+
 if __name__ == "__main__":
 
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate MIDI sequences with specified parameters.")
-    parser.add_argument("--num_bars_infilling", type=int, required=True, help="Number of bars for infilling")
-    parser.add_argument("--context", type=int, required=True, help="Context length")
-    parser.add_argument("--num_generations", type=int, required=True, help="Number of generations")
-    parser.add_argument("--drums", type=lambda x: x.lower() in ['true', '1', 'yes'], required=True, help="Boolean flag for drums (True/False)")
-    parser.add_argument("--end_infilling", type=lambda x: x.lower() in ['true', '1', 'yes'], required=True, help="Boolean flag for infilling end")
+    parser = argparse.ArgumentParser(description="Generate MIDI sequences "
+                                                 "with specified parameters.")
+    parser.add_argument("--num_bars_infilling", type=int, required=True,
+                        help="Number of bars for infilling")
+    parser.add_argument("--context", type=int, required=True,
+                        help="Context length")
+    parser.add_argument("--num_generations",
+                        type=int, required=True, help="Number of generations")
+    parser.add_argument("--drums",
+                        type=lambda x: x.lower() in ["true", "1", "yes"],
+                        required=True,
+                        help="Boolean flag for drums (True/False)")
+    parser.add_argument("--end_infilling",
+                        type=lambda x: x.lower() in ["true", "1", "yes"],
+                        required=True, help="Boolean flag for infilling end")
 
     # Parse arguments
     args = parser.parse_args()

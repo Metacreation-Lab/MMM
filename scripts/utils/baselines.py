@@ -42,11 +42,13 @@ from .constants import (
     DEEPSPEED,
     DISABLE_TQDM,
     EMBEDDING_SIZE,
+    EMBEDDING_SIZE_SMALL,
     EPSILON_CUTOFF,
     ETA_CUTOFF,
     EVAL_ACCUMULATION_STEPS,
     EVAL_STRATEGY,
     FEEDFORWARD_SIZE,
+    FEEDFORWARD_SIZE_SMALL,
     FP16,
     FP16_EVAL,
     FULL_DETERMINISM,
@@ -64,17 +66,21 @@ from .constants import (
     LOGGING_STRATEGY,
     LR_SCHEDULER,
     MAX_POSITION_EMBEDDINGS,
+    MAX_POSITION_EMBEDDINGS_SMALL,
     MAX_SEQ_LEN,
     MIN_NUM_BARS_FILE_VALID,
     MIN_NUM_NOTES_FILE_VALID,
     NEFTUNE_NOISE_ALPHA,
     NUM_ATTENTION_HEADS,
+    NUM_ATTENTION_HEADS_SMALL,
     NUM_BEAMS,
     NUM_INFERENCES_EVAL,
     NUM_KEY_VALUE_HEADS,
+    NUM_KEY_VALUE_HEADS_SMALL,
     NUM_LAYERS,
     NUM_LAYERS_SEQ2SEQ_DECODER,
     NUM_LAYERS_SEQ2SEQ_ENCODER,
+    NUM_LAYERS_SMALL,
     NUM_TRAIN_EPOCHS,
     PUSH_TO_HF_HUB,
     RATIO_BAR_INFILLING,
@@ -87,6 +93,7 @@ from .constants import (
     SAVE_TOTAL_LIMIT,
     SEED,
     SLIDING_WINDOWS,
+    SLIDING_WINDOWS_SMALL,
     TEMPERATURE_SAMPLING,
     TOKENIZER_PARAMS,
     TOP_K,
@@ -183,18 +190,20 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path("../data/GigaMIDI")
+        dataset_path = Path("../data")
+        #dataset_path = Path("/home/daevide/scratch/data")
 
         try:
             # Load the datasets using load_dataset
             return load_dataset(
                 "parquet",
                 data_files={
-                    "train": dataset_path / "all-instruments-with-drums"
-                    "/train.parquet",
-                    "validation": dataset_path / "all-instruments-with-drums"
-                    "/validation.parquet",
-                    "test": dataset_path / "all-instruments-with-drums/test.parquet",
+                    "train": str(dataset_path /
+                                 "all-instruments-with-drums/train.parquet"),
+                    "validation": str(dataset_path /
+                                      "all-instruments-with-drums/validation.parquet"),
+                    "test": str(dataset_path /
+                                "all-instruments-with-drums/test.parquet"),
                 },
             )
         except PermissionError:
@@ -356,6 +365,19 @@ mistral_config = MistralConfig(
     attn_implementation=attn_implem,
     torch_dtype=dtype,
 )
+
+# Vocab size is the size of base vocabulary of the tokenizer
+mistral_small_config = MistralConfig(
+    hidden_size=EMBEDDING_SIZE_SMALL,
+    intermediate_size=FEEDFORWARD_SIZE_SMALL,
+    num_hidden_layers=NUM_LAYERS_SMALL,
+    num_attention_heads=NUM_ATTENTION_HEADS_SMALL,
+    num_key_value_heads=NUM_KEY_VALUE_HEADS_SMALL,
+    max_position_embeddings=MAX_POSITION_EMBEDDINGS_SMALL,
+    sliding_window=SLIDING_WINDOWS_SMALL,
+    attn_implementation=attn_implem,
+    torch_dtype=dtype,
+)
 gpt2_config = GPT2Config(
     vocab_size=VOCAB_SIZE,
     n_positions=MAX_POSITION_EMBEDDINGS,
@@ -366,6 +388,7 @@ gpt2_config = GPT2Config(
     attn_implementation=attn_implem,
     torch_dtype=dtype,
 )
+
 t5_config = LongT5Config(
     vocab_size=VOCAB_SIZE,
     d_model=EMBEDDING_SIZE,
@@ -410,6 +433,17 @@ mmm_gpt2 = MMM(
     SEED,
     deepcopy(tok_config),
     deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+)
+
+mmm_small_gpt2 = MMM(
+    "MMM_11M_mistral",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(mistral_small_config),
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),

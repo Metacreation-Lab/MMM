@@ -12,7 +12,7 @@ HERE = Path(__file__).parent
 MIDI_PATHS = list((HERE / "test_midis").glob("**/*.mid"))
 
 # Used to test limit cases
-# MIDI_PATH = HERE / "test_real_time" / "midis" / "4_bar.mid"
+MIDI_PATH = HERE / "test_real_time" / "midis" / "4_bar.mid"
 
 
 class DummyModel:

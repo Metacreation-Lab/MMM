@@ -6,3 +6,6 @@ runs/models
 __pycache__
 **/__pycache__
 /.MMM
+/debug
+/tests/output
+/tests/test_midis

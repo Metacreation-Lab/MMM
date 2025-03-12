@@ -29,7 +29,7 @@ def generate(
     inference_config: InferenceConfig,
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
-    input_tokens =None
+    input_tokens: TokSequence | list[TokSequence] = None
 ) -> Score:
     """
     Use the model to generate new music content.
@@ -56,7 +56,8 @@ def generate(
     # Infill bars
     if inference_config.infilling:
         score = generate_infilling(
-            model, tokenizer, inference_config, score, logits_processor, generate_kwargs, deepcopy(input_tokens)
+            model, tokenizer, inference_config, score, logits_processor,
+            generate_kwargs, deepcopy(input_tokens)
         )
 
     # Generate new tracks
@@ -134,10 +135,9 @@ def generate_infilling(
     model: object,
     tokenizer: MMM,
     inference_config: InferenceConfig,
-    score: Score,
     logits_processor: StopLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
-    input_tokens = None
+    input_tokens: TokSequence | list[TokSequence]  = None
 ) -> Score:
     """
     Generate a new portion of a ``symusic.Score``.
@@ -255,7 +255,8 @@ def infill_bars(
         start_time = time.time()
 
         input_seq, token_start_idx, token_end_idx = _adapt_prompt_for_bar_infilling(
-            tokenizer, track_idx, tokens, subset_bars_to_infill, inference_config.context_length
+            tokenizer, track_idx, tokens, subset_bars_to_infill,
+            inference_config.context_length
         )
 
         end_time = time.time()
