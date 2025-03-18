@@ -190,8 +190,7 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path("../data")
-        #dataset_path = Path("/home/daevide/scratch/data")
+        dataset_path = Path("../data/GigaMIDI")
 
         try:
             # Load the datasets using load_dataset
