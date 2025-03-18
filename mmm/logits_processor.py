@@ -27,12 +27,13 @@ class StopLogitsProcessor(LogitsProcessor):
     # step as we may need to infill a different number of bars at each step
     n_attribute_controls: int = 0  # Number of attribute controls to skip
     # when decoding using BPE
+    infill_type: str = None
 
     def __init__(
         self,
         bar_start_token_id: int,
         eos_token_id: int,
-        tokenizer: miditok.MusicTokenizer,
+        tokenizer: miditok.MusicTokenizer
     ) -> None:
         self.bar_start_token_id = bar_start_token_id
         self.eos_token_id = eos_token_id
@@ -57,9 +58,14 @@ class StopLogitsProcessor(LogitsProcessor):
 
         generated_tokens = TokSequence(are_ids_encoded=True)
 
-        fill_start_idx = np.where(
-            input_ids[0].numpy() == self.tokenizer.vocab["FillBar_Start"]
-        )[0][0]
+        if self.infill_type == "bar":
+            fill_start_idx = np.where(
+                input_ids[0].numpy() == self.tokenizer.vocab["FillBar_Start"]
+            )[0][0]
+        elif self.infill_type == "track":
+            fill_start_idx = np.where(
+                input_ids[0].numpy() == self.tokenizer.vocab["Infill_Track"]
+            )[0][0]
 
         n_bar_none = 0
         if fill_start_idx + self.n_attribute_controls + 1 < len(input_ids[0]):

@@ -134,6 +134,7 @@ def test_generate(tokenizer: MMM,
                         bar_idx_infill_start,
                         bar_idx_infill_start + NUM_BARS_TO_INFILL,
                         [],
+                        "bar"
                     )
                 ],
             },
@@ -220,7 +221,8 @@ if __name__ == "__main__":
 
     MIDI_OUTPUT_FOLDER = (Path(__file__).parent
                           / "output"
-                          / f"temp{TEMPERATURE_SAMPLING}"
+                          /"TEST_TRACK_INFILLING" 
+                          f"temp{TEMPERATURE_SAMPLING}"
                             f"_rep{REPETITION_PENALTY}"
                             f"_topK{TOP_K}_topP{TOP_P}"
                             f"num_bars_infill{NUM_BARS_TO_INFILL}_context{CONTEXT_SIZE}{additional_flags}")
