@@ -297,8 +297,8 @@ class DatasetMMM(DatasetMIDI):
         # Augment and preprocess the music.
         # We need to preprocess it here as we require it preprocessed to select the
         # bars and tracks indexes for attribute controls before tokenizing.
-        # score = self.augment_and_preprocess_score(score)
-        score = self.tokenizer.preprocess_score(score)
+        score = self.augment_and_preprocess_score(score)
+        
         if len(score.tracks) == 0:
             return None, None
 
@@ -318,16 +318,10 @@ class DatasetMMM(DatasetMIDI):
                 np.where(bars_ticks <= score.tracks[track_infilling_idx].notes[-1].time)
             ]
 
-            # Generate a random number between 1 and 20
-            #infill_section_num_bars = random.randint(1, self.max_bar_infilling_length)
-
-            #if infill_section_num_bars > len(bars_ticks):
-            #    infill_section_num_bars = random.randint(1, 4)
-
             infill_section_num_bars = max(
                 1,
                 round(
-                    len(bars_ticks) * uniform(0.1,0.4)
+                    len(bars_ticks) * uniform(*self.bar_masking_duration_ratio_range)
                 ),
             )
 
