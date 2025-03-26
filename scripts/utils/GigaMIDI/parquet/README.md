@@ -10,39 +10,15 @@ source_datasets:
 tags: []
 task_ids: []
 configs:
-  - config_name: all-instruments-with-drums
+  - config_name: v1.0.0
     default: true
     data_files:
     - split: train
-      path: "all-instruments-with-drums/train.parquet"
+      path: "v1.0.0/train.parquet"
     - split: validation
-      path: "all-instruments-with-drums/validation.parquet"
+      path: "v1.0.0/validation.parquet"
     - split: test
-      path: "all-instruments-with-drums/test.parquet"
-  - config_name: no-drums
-    data_files:
-    - split: train
-      path: "no-drums/train.parquet"
-    - split: validation
-      path: "no-drums/validation.parquet"
-    - split: test
-      path: "no-drums/test.parquet"
-  - config_name: drums-only
-    data_files:
-    - split: train
-      path: "drums-only/train.parquet"
-    - split: validation
-      path: "drums-only/validation.parquet"
-    - split: test
-      path: "drums-only/test.parquet"
-  - config_name: all
-    data_files:
-    - split: train
-      path: "*/train.parquet"
-    - split: validation
-      path: "*/validation.parquet"
-    - split: test
-      path: "*/test.parquet"
+      path: "v1.0.0/test.parquet"
 ---
 
 # Dataset Card for GigaMIDI

@@ -4,18 +4,15 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
-from shutil import copy2
 
-from datasets import Dataset
-from miditok.constants import SCORE_LOADING_EXCEPTION
+import datasets
+from miditok.constants import MIDI_FILES_EXTENSIONS, SCORE_LOADING_EXCEPTION
 from symusic import Score
 from symusic.core import TextMetaSecond
 from tqdm import tqdm
-from webdataset import ShardWriter
-
-from scripts.utils.GigaMIDI.GigaMIDI import _SPLITS
 
 MAX_NUM_ENTRIES_PER_SHARD = 50000
 SUBSET_PATHS = {
@@ -23,16 +20,65 @@ SUBSET_PATHS = {
     "drums-only": "drums",
     "no-drums": "music",
 }
+SPLITS = ["test", "train", "validation"]
 
 
-def create_webdataset_gigamidi(main_data_dir_path: Path) -> None:
+# Specify the types of values of each column of the dataset
+# This is required for the loading method (from_generator)
+DATASET_FEATURES = {
+    "md5": datasets.Value("string"),
+    "music": datasets.Value("binary"),
+    "instrument_category": datasets.Value("string"),
+    "sid_matches": datasets.Sequence(
+        {"sid": datasets.Value("string"), "score": datasets.Value("float16")}
+    ),
+    "mbid_matches": datasets.Sequence(
+        {
+            "sid": datasets.Value("string"),
+            "mbids": datasets.Sequence(datasets.Value("string")),
+        }
+    ),
+    "artist_scraped": datasets.Value("string"),
+    "title_scraped": datasets.Value("string"),
+    "genres_curated": datasets.Value("string"),
+    "genres_scraped": datasets.Sequence(datasets.Value("string")),
+    "genres_discogs": datasets.Sequence(
+        {"genre": datasets.Value("string"), "count": datasets.Value("int16")}
+    ),
+    "genres_tagtraum": datasets.Sequence(
+        {"genre": datasets.Value("string"), "count": datasets.Value("int16")}
+    ),
+    "genres_lastfm": datasets.Sequence(
+        {"genre": datasets.Value("string"), "count": datasets.Value("int16")}
+    ),
+    "median_metric_depth": datasets.Sequence(datasets.Value("int16")),
+    "loops": datasets.Sequence(
+        {
+            "track_idx": datasets.Value("uint16"),
+            "start_tick": datasets.Value("uint32"),
+            "end_tick": datasets.Value("uint32"),
+        }
+    ),
+}
+
+
+def path_data_directory_local_fs() -> Path:
+    """
+    Return the path to the root data directory on the local file system.
+
+    :return: path to the root data directory.
+    """
+    return Path.home() / "git" / "data"
+
+
+def create_parquet_gigamidi(main_data_dir_path: Path, dataset_version: str) -> None:
     """
     Create the WebDataset shard for the GigaMIDI dataset.
 
     :param main_data_dir_path: path of the directory containing the datasets.
+    :param dataset_version: version of the dataset, used as subset name.
     """
     dataset_path = main_data_dir_path / "GigaMIDI_original"
-    webdataset_path = main_data_dir_path / "GigaMIDI"
 
     # Load metadata
     md5_sid_matches_scores = {}
@@ -68,6 +114,12 @@ def create_webdataset_gigamidi(main_data_dir_path: Path) -> None:
             for genre_list in entry["genre"]:
                 genres += genre_list
             md5_genres_scraped[entry["md5"]] = genres
+    md5_genres_curated = {}
+    with (dataset_path / "Curated_Style_Data_MD5_GigaMIDI.csv").open() as file:
+        reader = csv.reader(file)
+        next(reader)  # skipping header
+        for row in tqdm(reader, desc="Reading curated genres MMD metadata"):
+            md5_genres_curated[row[-1]] = row[-2]
     md5_artist_title_scraped = {}
     with (
         main_data_dir_path / "MMD_METADATA" / "MMD_scraped_title_artist.jsonl"
@@ -102,61 +154,49 @@ def create_webdataset_gigamidi(main_data_dir_path: Path) -> None:
                 md5_loop[md5] = []
             md5_loop[md5].append((parts[1], *parts[4:6]))
 
-    # Sharding the data into tar archives
-    num_shards = {}
-    for subset, subset_path in SUBSET_PATHS.items():
-        num_shards[subset] = {}
-        for split in _SPLITS:
-            files_paths = list((dataset_path / split / subset_path).glob("**/*.mid"))
-            save_path = webdataset_path / subset / split
-            save_path.mkdir(parents=True, exist_ok=True)
-            metadata = {}
-            with ShardWriter(
-                f"{save_path!s}/GigaMIDI_{subset}_{split}_%04d.tar",
-                maxcount=MAX_NUM_ENTRIES_PER_SHARD,
-            ) as writer:
-                for file_path in files_paths:
-                    md5 = file_path.stem
-                    example = {
-                        "__key__": md5,
-                        "mid": file_path.open("rb").read(),  # bytes
-                    }
-                    writer.write(example)
+    def gen(split_: str) -> dict:
+        for subset_name, subset_path_name in SUBSET_PATHS.items():
+            subset_path = dataset_path / split_ / subset_path_name
+            midi_files_paths = []
+            for ext in MIDI_FILES_EXTENSIONS:
+                midi_files_paths += subset_path.glob(f"*{ext}")
+            for file_path in midi_files_paths:
+                md5 = file_path.stem
+                with file_path.open("rb") as file:
+                    midi_file_bytes = file.read()
 
-                    # Get metadata if existing
-                    metadata_row = {}
+                # Get metadata if existing
+                metadata_ = {}
 
-                    sid_matches = md5_sid_matches_scores.get(md5)
-                    if sid_matches:
-                        metadata_row["sid_matches"] = sid_matches
-                        metadata_row["mbid_matches"] = []
-                        for sid, _ in sid_matches:
-                            mbids = sid_to_mbid.get(sid, None)
-                            if mbids:
-                                metadata_row["mbid_matches"].append([sid, mbids])
+                sid_matches = md5_sid_matches_scores.get(md5)
+                if sid_matches:
+                    metadata_["sid_matches"] = sid_matches
+                    metadata_["mbid_matches"] = []
+                    for sid, _ in sid_matches:
+                        mbids = sid_to_mbid.get(sid, None)
+                        if mbids:
+                            metadata_["mbid_matches"].append([sid, mbids])
 
-                    title_artist = md5_artist_title_scraped.get(md5)
-                    if title_artist:
-                        (
-                            metadata_row["title_scraped"],
-                            metadata_row["artist_scraped"],
-                        ) = title_artist
-                    genres_scraped = md5_genres_scraped.get(md5)
-                    if genres_scraped:
-                        metadata_row["genres_scraped"] = genres_scraped
-                    genres = md5_genres.get(md5)
-                    if genres:
-                        for key, val in genres.items():
-                            metadata_row[f"genres_{key.split('_')[1]}"] = val
-                    interpreted_scores = md5_expressive.get(md5)
-                    if interpreted_scores:
-                        metadata_row["median_metric_depth"] = interpreted_scores
-                    loops = md5_loop.get(md5)
-                    if loops:
-                        try:
-                            score = Score(file_path, ttype="second")
-                        except SCORE_LOADING_EXCEPTION:
-                            continue  # no loops saved for corrupted files
+                title_artist = md5_artist_title_scraped.get(md5)
+                if title_artist:
+                    (
+                        metadata_["title_scraped"],
+                        metadata_["artist_scraped"],
+                    ) = title_artist
+                genres_scraped = md5_genres_scraped.get(md5)
+                if genres_scraped:
+                    metadata_["genres_scraped"] = genres_scraped
+                genres = md5_genres.get(md5)
+                if genres:
+                    for key, val in genres.items():
+                        metadata_[f"genres_{key.split('_')[1]}"] = val
+                interpreted_scores = md5_expressive.get(md5)
+                if interpreted_scores:
+                    metadata_["median_metric_depth"] = interpreted_scores
+                loops = md5_loop.get(md5)
+                if loops:
+                    try:
+                        score = Score(file_path, ttype="second")
                         score.markers = []  # delete all existing ones for simplicity
                         for track_id, start_sec, end_sec in loops:
                             score.markers.append(
@@ -184,31 +224,72 @@ def create_webdataset_gigamidi(main_data_dir_path: Path) -> None:
                                         marker.time,
                                     )
                                 )
-                        metadata_row["loops"] = loops_ticks
-                    if len(metadata_row) > 0:
-                        metadata[md5] = metadata_row
+                        metadata_["loops"] = loops_ticks
+                    except SCORE_LOADING_EXCEPTION:
+                        pass  # no loops saved for corrupted files
 
-            num_shards[subset][split] = len(list(save_path.glob("*.tar")))
-            # Saving metadata for this subset and split
-            """
-            with (save_path.parent / f"metadata_{subset}_{split}.csv").open("w") as f:
-                writer = csv.writer(f)
-                writer.writerow(["md5", ])  # TODO header
-                for row in metadata:
-                    writer.writerow([row])"""
-            with (save_path.parent / f"metadata_{subset}_{split}.json").open("w") as f:
-                json.dump(metadata, f)
+                yield {
+                    "md5": md5,
+                    "music": midi_file_bytes,
+                    "instrument_category": subset_name,
+                    "sid_matches": [
+                        {"sid": sid, "score": score}
+                        for sid, score in metadata_.get("sid_matches", [])
+                    ],
+                    "mbid_matches": [
+                        {"sid": sid, "mbids": mbids}
+                        for sid, mbids in metadata_.get("mbid_matches", [])
+                    ],
+                    "artist_scraped": metadata_.get("artist_scraped"),
+                    "title_scraped": metadata_.get("title_scraped"),
+                    "genres_curated": md5_genres_curated.get(md5),
+                    "genres_scraped": metadata_.get("genres_scraped"),
+                    "genres_discogs": [
+                        {"genre": genre, "count": count}
+                        for genre, count in metadata_.get("genres_discogs", {}).items()
+                    ],
+                    "genres_tagtraum": [
+                        {"genre": genre, "count": count}
+                        for genre, count in metadata_.get("genres_tagtraum", {}).items()
+                    ],
+                    "genres_lastfm": [
+                        {"genre": genre, "count": count}
+                        for genre, count in metadata_.get("genres_lastfm", {}).items()
+                    ],
+                    "median_metric_depth": metadata_.get("median_metric_depth"),
+                    "loops": [
+                        {
+                            "track_idx": track_idx,
+                            "start_tick": start_tick,
+                            "end_tick": end_tick,
+                        }
+                        for track_idx, start_tick, end_tick in metadata_.get(
+                            "loops", []
+                        )
+                    ],
+                }
 
-    # Saving n shards
-    with (webdataset_path / "n_shards.json").open("w") as f:
-        json.dump(num_shards, f, indent=4)
-    # Copy loading script
-    copy2(Path("scripts", "utils", "GigaMIDI.py"), webdataset_path / "GigaMIDI.py")
+    # Loading the dataset from the generator above
+    for split in SPLITS:
+        dataset = datasets.Dataset.from_generator(
+            gen,
+            features=datasets.Features(DATASET_FEATURES),
+            gen_kwargs={"split_": split},
+            split=split,
+        )
+
+        # Convert the Dataset object to parquet and upload it to the Hugging Face hub
+        dataset.to_parquet(
+            path_data_directory_local_fs()
+            / "GigaMIDI"
+            / dataset_version
+            / f"{split}.parquet"
+        )
 
 
 def load_dataset_from_generator(
     dataset_path: Path, num_files_limit: int = 100
-) -> Dataset:
+) -> datasets.Dataset:
     """
     Load the dataset.
 
@@ -217,15 +298,11 @@ def load_dataset_from_generator(
     :return: dataset.
     """
     files_paths = list(dataset_path.glob("**/*.mid"))[:num_files_limit]
-    return Dataset.from_dict({"music": [str(path_) for path_ in files_paths]})
+    return datasets.Dataset.from_dict({"music": [str(path_) for path_ in files_paths]})
 
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
-
-    from datasets import load_dataset
-
-    from scripts.utils.utils import path_data_directory_local_fs
 
     parser = ArgumentParser(description="Dataset creation script")
     parser.add_argument(
@@ -233,24 +310,21 @@ if __name__ == "__main__":
     )
     parser.add_argument("--hf-token", type=str, required=False, default=None)
     args = vars(parser.parse_args())
+    DATASET_VERSION = "v1.0.0"
+
+    """
+    # Example of how to write back midi files from the parquet files
+    dataset = datasets.load_dataset(args["hf_repo_name"], token=args["hf_token"])
+    for split_name, split_subset in dataset.items():
+        split_dir_path = Path(split_name)
+        split_dir_path.mkdir(exist_ok=True)
+        for row in split_subset:
+            midi_bytes = row["music"]
+            with (split_dir_path / f"row['md5'].mid").open("wb") as file:
+                file.write(midi_bytes)"""
 
     # Load all the raw data (MIDI files, csv and json metadata)
-    create_webdataset_gigamidi(path_data_directory_local_fs())
-
-    # Convert the webdataset into parquet
-    for subset_name in SUBSET_PATHS:
-        dataset_ = load_dataset(
-            str(path_data_directory_local_fs() / "GigaMIDI"),
-            subset_name,
-        )
-        for split, subset in dataset_.items():
-            subset.to_parquet(
-                path_data_directory_local_fs()
-                / "GigaMIDI"
-                / "parquet"
-                / subset_name
-                / f"{split}.parquet"
-            )
+    create_parquet_gigamidi(path_data_directory_local_fs(), DATASET_VERSION)
 
     """from datasets import load_dataset
 
