@@ -128,7 +128,7 @@ class TokTrainingIterator:
 
 if __name__ == "__main__":
     from transformers.trainer_utils import set_seed
-    from utils.baselines import mmm_mistral
+    from utils.baselines import mmm_ep_mistral as mmm_mistral
     from utils.constants import TRAINING_TOKENIZER_MAX_NUM_FILES
 
     set_seed(mmm_mistral.seed)

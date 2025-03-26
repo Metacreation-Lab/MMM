@@ -96,6 +96,7 @@ from .constants import (
     SLIDING_WINDOWS_SMALL,
     TEMPERATURE_SAMPLING,
     TOKENIZER_PARAMS,
+    EXP_TOKENIZER_PARAMS,
     TOP_K,
     TOP_P,
     TORCH_COMPILE,
@@ -352,6 +353,9 @@ data_config = DataConfig(
 tok_config = TokenizationConfig(
     "MMM", TokenizerConfig(**deepcopy(TOKENIZER_PARAMS)), VOCAB_SIZE
 )
+exp_tok_config = TokenizationConfig(
+    "MMM", TokenizerConfig(**deepcopy(EXP_TOKENIZER_PARAMS)), VOCAB_SIZE
+)
 mistral_config = MistralConfig(
     vocab_size=VOCAB_SIZE,
     hidden_size=EMBEDDING_SIZE,
@@ -420,6 +424,17 @@ mmm_mistral = MMM(
     "GigaMIDI",
     SEED,
     deepcopy(tok_config),
+    deepcopy(mistral_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+)
+
+mmm_ep_mistral = MMM(
+    "MMM-EP_mistral",
+    "GigaMIDI",
+    SEED,
+    deepcopy(exp_tok_config),
     deepcopy(mistral_config),
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
