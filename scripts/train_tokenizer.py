@@ -140,6 +140,7 @@ if __name__ == "__main__":
         list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))
     )
     iterator = TokTrainingIterator(mmm_mistral.tokenizer, dataset_)
+    print('training')
     mmm_mistral.tokenizer.train(
         vocab_size=mmm_mistral.tokenization_config.vocab_size,
         iterator=iterator,
