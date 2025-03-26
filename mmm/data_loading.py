@@ -18,8 +18,6 @@ from miditok.utils import get_bars_ticks
 from symusic import Score
 from torch import LongTensor, isin
 
-from scripts.utils.constants import SLURM_OUT_INFO_BASE_DIR
-
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -325,8 +323,6 @@ class DatasetMMM(DatasetMIDI):
                 ),
             )
 
-            with open(f"{SLURM_OUT_INFO_BASE_DIR}/num_bars_infilling.txt", "a") as f:
-                f.write(f"{infill_section_num_bars}\n")
 
             #print (infill_section_num_bars)
 
@@ -543,16 +539,6 @@ class DatasetMMM(DatasetMIDI):
                      - 1
             )
 
-            # log info to files
-            if(bar_infilling):
-                with open(f"{SLURM_OUT_INFO_BASE_DIR}/"
-                          f"num_context_bars_infilling.txt", "a") as f:
-                    value = bar_end_idx - bar_start_idx - infill_section_num_bars
-                    f.write(f"{value}\n")
-            else:
-                with open(f"{SLURM_OUT_INFO_BASE_DIR}/"
-                          f"num_bars_track_infilling.txt", "a") as f:
-                    f.write(f"{bar_end_idx - bar_start_idx}\n")
 
             # Decrease bar idx to infill
             if bar_infilling:
