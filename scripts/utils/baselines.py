@@ -435,7 +435,7 @@ mmm_mistral = MMM(
 )
 
 mmm_ep_mistral = MMM(
-    "MMM-EP_mistral",
+    "MMM_ep_mistral",
     "GigaMIDI",
     SEED,
     deepcopy(exp_tok_config),
@@ -490,4 +490,4 @@ mmm_t5 = MMM(
 )
 mmm_t5.seq2seq = True
 
-baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2]}
+baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_mistral, mmm_small_gpt2]}

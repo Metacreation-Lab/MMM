@@ -18,8 +18,6 @@ from miditok.utils import get_bars_ticks
 from symusic import Score
 from torch import LongTensor, isin
 
-from scripts.utils.constants import SLURM_OUT_INFO_BASE_DIR
-
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -193,8 +191,11 @@ class DatasetMMM(DatasetMIDI):
         """
         # The tokenization steps are outside the try bloc as if there are errors,
         # we might want to catch them to fix them instead of skipping the iteration.
+        metadata = {}
         try:
-            score = Score.from_midi(self._dataset[idx]["music"])
+            element = self._dataset[idx]
+            score = Score.from_midi(element["music"])
+            metadata["nomml"] = element["median_metric_depth"]
         except SCORE_LOADING_EXCEPTION:
             item = {self.sample_key_name: None, self.labels_key_name: None}
             if self.seq2seq:
@@ -203,7 +204,7 @@ class DatasetMMM(DatasetMIDI):
 
         # Tokenize the score
         try:
-            tseq, decoder_input_ids = self._tokenize_score(score)
+            tseq, decoder_input_ids = self._tokenize_score(score, metadata)
         except IndexError:
             item = {self.sample_key_name: None, self.labels_key_name: None}
             if self.seq2seq:
@@ -234,7 +235,9 @@ class DatasetMMM(DatasetMIDI):
         return item
 
     def _tokenize_score(
-        self, score: Score
+        self, 
+        score: Score,
+        metadata: dict[str, list[int] | int | str | None] = {}, 
     ) -> tuple[TokSequence, TokSequence | None] | tuple[None, None]:
 
         debug = False
@@ -263,20 +266,6 @@ class DatasetMMM(DatasetMIDI):
             if len(score.tracks[idx].notes) > 0
                and score.tracks[idx].notes[-1].time > bars_ticks[1]
         ]  # always at least one
-        # Initialize the list to store the selected indices
-
-        selected_tracks = [] # Just for debugging purposes
-
-        # Select random indices for the tracks
-        score.tracks = [
-            score.tracks[idx]
-            for idx in sample(
-                tracks_idx_ok, k=min(num_tracks_to_keep, len(tracks_idx_ok))
-            )
-            if selected_tracks.append(idx) or True  # Save each selected index
-        ]
-
-        #print(selected_tracks)
 
         # Remove time signatures and tempos occurring after the start of the last note
         max_note_time = 0
@@ -325,8 +314,6 @@ class DatasetMMM(DatasetMIDI):
                 ),
             )
 
-            with open(f"{SLURM_OUT_INFO_BASE_DIR}/num_bars_infilling.txt", "a") as f:
-                f.write(f"{infill_section_num_bars}\n")
 
             #print (infill_section_num_bars)
 
@@ -389,6 +376,17 @@ class DatasetMMM(DatasetMIDI):
               for track_idx in range(len(score.tracks))
             }
             #print(ac_indexes)
+
+        # Only activate microtiming tokens if at least one of the tracks
+        # is expressively performed.
+        use_microtiming = False
+        if "nomml" in metadata.keys():
+            max_nomml = max(metadata["nomml"])
+            min_nomml = min(metadata["nomml"])
+            # If tracks and nomml don't match, abandon microtiming
+            if max_nomml > max_nomml_microtiming - 1 and len(metadata["nomml"]) == len(score.tracks):
+                use_microtiming = True
+        self.tokenizer.base_tokenizer.use_microtiming = use_microtiming
 
         # Tokenize it
         sequences = self.tokenizer.encode(
@@ -543,16 +541,6 @@ class DatasetMMM(DatasetMIDI):
                      - 1
             )
 
-            # log info to files
-            if(bar_infilling):
-                with open(f"{SLURM_OUT_INFO_BASE_DIR}/"
-                          f"num_context_bars_infilling.txt", "a") as f:
-                    value = bar_end_idx - bar_start_idx - infill_section_num_bars
-                    f.write(f"{value}\n")
-            else:
-                with open(f"{SLURM_OUT_INFO_BASE_DIR}/"
-                          f"num_bars_track_infilling.txt", "a") as f:
-                    f.write(f"{bar_end_idx - bar_start_idx}\n")
 
             # Decrease bar idx to infill
             if bar_infilling:
