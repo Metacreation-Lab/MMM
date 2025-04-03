@@ -67,7 +67,7 @@ Generate
     # Instantiate the tokenizer
     MMM(params="/path/to/tokenizer.json")
 
-    output_scores = generate(
+    output_scores, metadata = generate(
             model,
             tokenizer,
             inference_config,

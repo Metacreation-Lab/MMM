@@ -144,7 +144,7 @@ def test_generate(tokenizer: MMM,
     try:
         start_time = time.time()
 
-        _ = generate(
+        _,_m = generate(
             model,
             tokenizer,
             inference_config,

@@ -30,7 +30,7 @@ def generate(
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
     input_tokens: TokSequence | list[TokSequence] = None
-) -> Score:
+) -> tuple[Score, dict]:
     """
     Use the model to generate new music content.
 
@@ -43,7 +43,7 @@ def generate(
     :param generate_kwargs: keyword arguments to provide to the ``model.generate``
         method. For Hugging Face models for example, you can provide a
         ``GenerationConfig`` using this argument.
-    :return: the infilled ``symusic.Score`` object.
+    :return: the infilled ``symusic.Score`` object and metadata (eg. loops).
     """
     score = (
         Score(score_or_path) if not isinstance(score_or_path, Score) else score_or_path
@@ -55,7 +55,7 @@ def generate(
 
     # Infill bars
     if inference_config.infilling:
-        score = generate_infilling(
+        score, metadata = generate_infilling(
             model, tokenizer, inference_config, logits_processor,
             generate_kwargs, deepcopy(input_tokens)
         )
@@ -63,9 +63,9 @@ def generate(
     # Generate new tracks
     if inference_config.autoregressive:
         for track in inference_config.new_tracks:
-            score = generate_new_track(model, tokenizer, track, generate_kwargs)
+            score, metadata = generate_new_track(model, tokenizer, track, generate_kwargs)
 
-    return score
+    return score, metadata
 
 
 def generate_new_track(
@@ -74,7 +74,7 @@ def generate_new_track(
     track: tuple[int, list[str]],
     score: Score,
     generate_kwargs: Mapping | None = None,
-) -> Score:
+) -> tuple[Score, dict]:
     """
     Generate a new track of a given Score.
 
@@ -128,7 +128,8 @@ def generate_new_track(
         output_seq.ids.append(tokenizer.vocab["Track_End"])
         output_seq.tokens.append("Track_End")
 
-    return tokenizer._tokens_to_score(output_seq)
+    result, metadata = tokenizer._tokens_to_score(output_seq)
+    return result, metadata
 
 
 def generate_infilling(
@@ -138,7 +139,7 @@ def generate_infilling(
     logits_processor: StopLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
     input_tokens: TokSequence | list[TokSequence]  = None
-) -> Score:
+) -> tuple[Score, dict]:
     """
     Generate a new portion of a ``symusic.Score``.
 
@@ -208,13 +209,13 @@ def generate_infilling(
     # Here we use the base tokenizer because output_tokens is a list of TokSequences
 
     start_time = time.time()
-    result = tokenizer.base_tokenizer._tokens_to_score(input_tokens)
+    result, metadata = tokenizer.base_tokenizer._tokens_to_score(input_tokens)
     end_time = time.time()
     print(
         "[INFO::generate_infilling] Time spent for converting tokens to score: ",
         end_time - start_time,
     )
-    return result
+    return result, metadata
 
 
 def infill_bars(
