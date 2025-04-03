@@ -128,21 +128,32 @@ class TokTrainingIterator:
 
 if __name__ == "__main__":
     from transformers.trainer_utils import set_seed
-    from utils.baselines import mmm_ep_mistral as mmm_mistral
+    from utils.baselines import baselines
     from utils.constants import TRAINING_TOKENIZER_MAX_NUM_FILES
 
-    set_seed(mmm_mistral.seed)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="mistral")
+    args = parser.parse_args()
+
+    try:
+        model = baselines[args.model]
+    except:
+        msg = f"Model name '{args.model}' not found. Must be one of following:\n   -"
+        msg += baselines.keys().join("\n   -")
+        raise ValueError(msg)
+    set_seed(model.seed)
 
     # Train the tokenizer
-    dataset_ = mmm_mistral.create_dataset_from_parquet()["train"]
+    dataset_ = model.create_dataset_from_parquet()["train"]
     dataset_.shuffle()
-    dataset_ = mmm_mistral.preprocess_dataset(dataset_).select(
+    dataset_ = model.preprocess_dataset(dataset_).select(
         list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))
     )
-    iterator = TokTrainingIterator(mmm_mistral.tokenizer, dataset_)
+    iterator = TokTrainingIterator(model.tokenizer, dataset_)
     print('training')
-    mmm_mistral.tokenizer.train(
-        vocab_size=mmm_mistral.tokenization_config.vocab_size,
+    model.tokenizer.train(
+        vocab_size=model.tokenization_config.vocab_size,
         iterator=iterator,
     )
-    mmm_mistral.tokenizer.save(mmm_mistral.tokenizer_path)
+    model.tokenizer.save(model.tokenizer_path)
