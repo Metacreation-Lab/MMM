@@ -116,7 +116,6 @@ class DatasetMMM(DatasetMIDI):
         decoder_key_name: str = "decoder_input_ids",
         labels_key_name: str = "labels",
         seq2seq: bool = False,
-        inject_loops: bool = False
     ) -> None:
         self._dataset = dataset
         self.ratio_random_tracks_range = ratio_random_tracks_range
@@ -130,7 +129,6 @@ class DatasetMMM(DatasetMIDI):
         self.bar_masking_duration_ratio_range = bar_masking_duration_ratio_range
         self.ac_random_ratio_range = ac_random_ratio_range
         self.seq2seq = seq2seq
-        self.inject_loops = inject_loops
 
         # Infill tokens, set as attribute here to avoid to access to vocab dic
         self._infill_bar_token_id = tokenizer.vocab["Infill_Bar"]
@@ -140,6 +138,10 @@ class DatasetMMM(DatasetMIDI):
         self._track_start_token_id = tokenizer.vocab["Track_Start"]
         self._track_end_token_id = tokenizer.vocab["Track_End"]
         self._bar_token_id = tokenizer.vocab["Bar_None"]
+        try:
+            self.inject_loops = tokenizer.use_loops
+        except:
+            self.inject_loops = False
         if self.inject_loops:
             try:
                 self._loop_start_token_id = tokenizer.vocab["Loop_Start"]
@@ -248,7 +250,7 @@ class DatasetMMM(DatasetMIDI):
     def _tokenize_score(
         self, 
         score: Score,
-        metadata: dict[str, list[int] | int | str | None] = {}, 
+        metadata: dict[str, list[int|dict] | int | str | None] = {}, 
     ) -> tuple[TokSequence, TokSequence | None] | tuple[None, None]:
 
         debug = False
@@ -297,6 +299,7 @@ class DatasetMMM(DatasetMIDI):
         # Augment and preprocess the music.
         # We need to preprocess it here as we require it preprocessed to select the
         # bars and tracks indexes for attribute controls before tokenizing.
+        old_tpq = score.tpq
         score = self.augment_and_preprocess_score(score)
         
         if len(score.tracks) == 0:
@@ -399,36 +402,31 @@ class DatasetMMM(DatasetMIDI):
                 use_microtiming = True
         self.tokenizer.base_tokenizer.use_microtiming = use_microtiming
 
+        loops = [] 
+        for i, track_idx in enumerate(metadata["loops"]["track_idx"]):
+            try:
+                start = metadata["loops"]["start_tick"][i]
+                end = metadata["loops"]["end_tick"][i]
+                loops.append({
+                    "track_idx":track_idx,
+                    "start_tick":start,
+                    "end_tick":end
+                })
+            except:
+                continue
+        metadata_encode = {
+            "tpq":old_tpq,
+            "loops":loops
+        }
+
         # Tokenize it
         sequences = self.tokenizer.encode(
             score,
             no_preprocess_score=True,
             attribute_controls_indexes=ac_indexes,
             concatenate_track_sequences=False,
+            metadata = metadata_encode
         )
-
-        # Add Loop tokens, and store bar position of loop start and end tokens
-        # to check if loops are still intact after window creation
-        # First we must convert the tick values to the equivalent position values
-        # and identify bar position in order to properly inject loop tokens in 
-        # sequence
-        # Tokenizer must have the encode_loops 
-        try:
-            loops = self.tokenizer.encode_loops(
-                score,
-                metadata["loops"]
-            )
-        except AttributeError:
-            loops = {
-                "start_pos": [],
-                "end_pos": [],
-                "track_idx": [],
-                "bar_idx": []
-            }
-
-        # Inject Loop tokens
-        for i in range(len(loops["track_idx"])):
-            track_idx = loops["track_idx"][i]
 
         if(debug):
 
