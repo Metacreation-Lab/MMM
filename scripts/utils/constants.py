@@ -127,6 +127,7 @@ EXP_LOOP_TOKENIZER_PARAMS = {
     "programs": list(range(-1, 127)),
     "base_tokenizer": "REAPER",
     "use_microtiming": True,
+    "use_loops":True,
     "one_token_stream_for_programs": False,
     "ac_polyphony_bar": True,
     "ac_polyphony_track": True,
@@ -144,6 +145,7 @@ EXP_LOOP_TOKENIZER_PARAMS = {
     "ac_repetition_track_num_bins": 10,
     "ac_repetition_track_num_consec_bars": 4,
     "ac_nomml_track": True,
+    "ac_loops_track":True
 }
 
 # TOKENIZER TRAINING PARAMS

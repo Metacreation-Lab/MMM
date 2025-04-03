@@ -17,7 +17,7 @@ echo "START TIME: $(date)"
 free -h
 
 # Defining the right environment variables
-export PYTHONPATH=$PYTHONPATH:$SCRATCH/MMM:$SCRATCH/MMM/.venv/lib/python3.11/site-packages/
+export PYTHONPATH=$PYTHONPATH:$SCRATCH/MMM
 export HF_HOME=$SCRATCH/.hf_cache
 
 # Load the python environment

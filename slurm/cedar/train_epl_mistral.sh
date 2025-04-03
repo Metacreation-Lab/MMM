@@ -21,7 +21,7 @@ MODEL_TRAIN_ARGS=" \
     --per-device-train-batch-size 16 \
     --per-device-eval-batch-size 32 \
     --gradient-accumulation-steps 2 \
-    --model MMM_ep_mistral \
+    --model MMM_epl_mistral \
     "
 
 # Output GPUs and ram info

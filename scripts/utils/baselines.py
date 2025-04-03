@@ -192,7 +192,7 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path("../data/GigaMIDI")
+        dataset_path = Path(self.dataset_path)
 
         try:
             # Load the datasets using load_dataset
@@ -446,7 +446,7 @@ mmm_ep_mistral = MMM(
 )
 
 mmm_epl_mistral = MMM(
-    "MMM-EPL_mistral",
+    "MMM_epl_mistral",
     "GigaMIDI",
     SEED,
     deepcopy(exp_loop_tok_config),
@@ -490,4 +490,4 @@ mmm_t5 = MMM(
 )
 mmm_t5.seq2seq = True
 
-baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_mistral, mmm_small_gpt2]}
+baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_mistral, mmm_epl_mistral, mmm_small_gpt2]}
