@@ -192,7 +192,8 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path(self.dataset_path)
+        dataset_path = Path(os.getenv("SCRATCH"), "data", self.dataset)
+        version = self.version
 
         try:
             # Load the datasets using load_dataset
@@ -200,11 +201,11 @@ class MMM(Baseline):
                 "parquet",
                 data_files={
                     "train": str(dataset_path /
-                                 "all-instruments-with-drums/train.parquet"),
+                                version / "train.parquet"),
                     "validation": str(dataset_path /
-                                      "all-instruments-with-drums/validation.parquet"),
+                                version / "validation.parquet"),
                     "test": str(dataset_path /
-                                "all-instruments-with-drums/test.parquet"),
+                                version / "test.parquet"),
                 },
             )
         except PermissionError:
@@ -443,6 +444,7 @@ mmm_ep_mistral = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
+    "v2.0.0"
 )
 
 mmm_epl_mistral = MMM(
@@ -454,6 +456,7 @@ mmm_epl_mistral = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
+    "v2.0.0"
 )
 
 mmm_gpt2 = MMM(

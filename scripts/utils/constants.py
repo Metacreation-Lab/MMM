@@ -113,8 +113,6 @@ EXP_LOOP_TOKENIZER_PARAMS = {
         "Infill_Track",  # Used in seq2seq to instruct the decoder to gen a new track
         "FillBar_Start",  # Start of the portion to infill (containing n bars)
         "FillBar_End",  # Ends the portion to infill
-        "Loop_Start", # Start of the loop
-        "Loop_End", # Ends the loop
     ],
     "use_chords": False,
     "use_rests": False,

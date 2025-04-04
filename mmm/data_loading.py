@@ -403,17 +403,32 @@ class DatasetMMM(DatasetMIDI):
         self.tokenizer.base_tokenizer.use_microtiming = use_microtiming
 
         loops = [] 
-        for i, track_idx in enumerate(metadata["loops"]["track_idx"]):
-            try:
-                start = metadata["loops"]["start_tick"][i]
-                end = metadata["loops"]["end_tick"][i]
-                loops.append({
-                    "track_idx":track_idx,
-                    "start_tick":start,
-                    "end_tick":end
-                })
-            except:
-                continue
+        if "loops" in metadata.keys():
+            if type(metadata["loops"]) == dict:
+                for i, track_idx in enumerate(metadata["loops"]["track_idx"]):
+                    try:
+                        start = metadata["loops"]["start_tick"][i]
+                        end = metadata["loops"]["end_tick"][i]
+                        loops.append({
+                            "track_idx":track_idx,
+                            "start_tick":start,
+                            "end_tick":end
+                        })
+                    except:
+                        continue
+            elif type(metadata["loops"]) == list:
+                for i, loop in enumerate(metadata["loops"]):
+                        try:
+                            start = loop["start_tick"]
+                            end = loop["end_tick"]
+                            track_idx = loop["track_idx"]
+                            loops.append({
+                                "track_idx":track_idx,
+                                "start_tick":start,
+                                "end_tick":end
+                            })
+                        except:
+                            continue
         metadata_encode = {
             "tpq":old_tpq,
             "loops":loops

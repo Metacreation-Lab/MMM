@@ -13,7 +13,7 @@
 #SBATCH --gpus-per-node=v100l:4
 #SBATCH --cpus-per-task=10   # nb of CPU cores per task
 #SBATCH --mem=100G
-#SBATCH --time=72:00:00
+#SBATCH --time=12:00:00
 
 # Define args
 MODEL_TRAIN_ARGS=" \
@@ -72,7 +72,7 @@ srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/dat
 export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
 
 # Load the python environment
-module load gcc arrow/17.0.0  # needed since arrow can't be installed in the venv via pip
+module load gcc arrow/17.0.0 cudacore/.12.6.2 cudacompat/.12.6 # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
 # Run the training

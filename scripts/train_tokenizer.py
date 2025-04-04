@@ -139,8 +139,8 @@ if __name__ == "__main__":
     try:
         model = baselines[args.model]
     except:
-        msg = f"Model name '{args.model}' not found. Must be one of following:\n   -"
-        msg += baselines.keys().join("\n   -")
+        msg = f"Model name '{args.model}' not found. Must be one of following:\n   - "
+        msg += "\n   - ".join(list(baselines.keys()))
         raise ValueError(msg)
     set_seed(model.seed)
 

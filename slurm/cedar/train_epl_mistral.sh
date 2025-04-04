@@ -3,9 +3,9 @@
 # Inspired from https://github.com/bigscience-workshop/bigscience/blob/7ccf7e42577fe71e88cf8bed3b9ca965c7afb8f7/train/tr11-176B-ml/tr11-176B-ml.slurm
 
 # Set SLURM / hardware environment
-#SBATCH --job-name=train-ep_mistral
-#SBATCH --output=logs/train-ep_mistral.out
-#SBATCH --error=logs/train-ep_mistral_err.out
+#SBATCH --job-name=train-epl_mistral
+#SBATCH --output=logs/train-epl_mistral.out
+#SBATCH --error=logs/train-epl_mistral_err.out
 #SBATCH --account=def-pasquier
 #SBATCH --mail-user=raa60@sfu.ca # Default mail
 #SBATCH --nodes=1            # total nb of nodes
@@ -13,7 +13,7 @@
 #SBATCH --gpus-per-node=v100l:4
 #SBATCH --cpus-per-task=10   # nb of CPU cores per task
 #SBATCH --mem=100G
-#SBATCH --time=72:00:00
+#SBATCH --time=12:00:00
 
 # Define args
 MODEL_TRAIN_ARGS=" \
@@ -71,8 +71,7 @@ srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/dat
 # Replace with line below when using one unique node
 export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
 
-# Load the python environment
-module load gcc arrow/17.0.0  # needed since arrow can't be installed in the venv via pip
+module load gcc arrow/17.0.0 cudacore/.12.6.2 cudacompat/.12.6
 source .venv/bin/activate
 
 # Run the training
