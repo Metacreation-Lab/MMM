@@ -3,9 +3,9 @@
 # Inspired from https://github.com/bigscience-workshop/bigscience/blob/7ccf7e42577fe71e88cf8bed3b9ca965c7afb8f7/train/tr11-176B-ml/tr11-176B-ml.slurm
 
 # Set SLURM / hardware environment
-#SBATCH --job-name=train-ep_mistral
-#SBATCH --output=logs/train-ep_mistral.out
-#SBATCH --error=logs/train-ep_mistral_err.out
+#SBATCH --job-name=train-ep_gpt2
+#SBATCH --output=logs/train-ep_gpt2.out
+#SBATCH --error=logs/train-ep_gpt2_err.out
 #SBATCH --account=def-pasquier
 #SBATCH --mail-user=raa60@sfu.ca # Default mail
 #SBATCH --nodes=1            # total nb of nodes
@@ -17,10 +17,10 @@
 
 # Define args
 MODEL_TRAIN_ARGS=" \
-    --per-device-train-batch-size 16 \
-    --per-device-eval-batch-size 32 \
+    --per-device-train-batch-size 12 \
+    --per-device-eval-batch-size 24 \
     --gradient-accumulation-steps 2 \
-    --model MMM_ep_mistral \
+    --model MMM_ep_gpt2 \
     "
 
 # Output GPUs and ram info

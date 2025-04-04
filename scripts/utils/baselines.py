@@ -120,6 +120,7 @@ if TYPE_CHECKING:
 
 
 attn_implem = "flash_attention_2" if "flash_attn" in sys.modules else None
+attn_implem = None
 dtype = torch.bfloat16 if BF16 else torch.float16 if FP16 else torch.float32
 
 
@@ -444,7 +445,7 @@ mmm_ep_mistral = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
-    "v2.0.0"
+    "v4.0.0"
 )
 
 mmm_epl_mistral = MMM(
@@ -456,7 +457,19 @@ mmm_epl_mistral = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
-    "v2.0.0"
+    "v4.0.0"
+)
+
+mmm_ep_gpt2 = MMM(
+    "MMM_ep_gpt2",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v4.0.0"
 )
 
 mmm_gpt2 = MMM(
@@ -493,4 +506,4 @@ mmm_t5 = MMM(
 )
 mmm_t5.seq2seq = True
 
-baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_mistral, mmm_epl_mistral, mmm_small_gpt2]}
+baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_gpt2, mmm_ep_mistral, mmm_epl_mistral, mmm_small_gpt2]}
