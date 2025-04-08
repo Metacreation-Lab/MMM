@@ -17,9 +17,11 @@
 
 # Define args
 MODEL_TRAIN_ARGS=" \
-    --per-device-train-batch-size 12 \
-    --per-device-eval-batch-size 24 \
+    --deepspeed slurm/ds_config.json \
+    --per-device-train-batch-size 8 \
+    --per-device-eval-batch-size 16 \
     --gradient-accumulation-steps 2 \
+    --eval_steps 100 \
     --model MMM_ep_gpt2 \
     "
 
@@ -50,8 +52,6 @@ export NCCL_DEBUG=WARN
 # https://github.com/huggingface/transformers/issues/5486
 # best explanation: https://stackoverflow.com/questions/62691279/how-to-disable-tokenizers-parallelism-true-false-warning/72926996#72926996
 export TOKENIZERS_PARALLELISM=0
-export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
-export TORCH_COMPILE=0
 
 # Move hugging face dataset from scratch to local file system
 # This is done on every nodes.
@@ -73,7 +73,7 @@ srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/dat
 export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
 
 # Load the python environment
-module load gcc arrow/17.0.0 cudacore/.12.6.2 cudacompat/.12.6 # needed since arrow can't be installed in the venv via pip
+module load gcc arrow/17.0.0 cuda/12.2 # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
 # Run the training

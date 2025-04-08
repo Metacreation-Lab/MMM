@@ -107,6 +107,7 @@ def whole_training_process(
     compute_metrics: Callable | None = None,
     resume_from_last_checkpoint: bool = True,
     do_test: bool = True,
+    pad_on_left: bool = False
 ) -> None:
     """
     Complete training of a model, including testing it when training is finished.
@@ -130,7 +131,7 @@ def whole_training_process(
     # Load data
     set_seed(baseline.seed)  # set before loading checkpoint
     subsets = baseline.create_data_subsets()
-    collator = baseline.create_data_collator()
+    collator = baseline.create_data_collator(pad_on_left=pad_on_left)
     """from tqdm import tqdm
     from torch.utils.data import DataLoader
 

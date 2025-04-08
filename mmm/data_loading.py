@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from random import choice, random, sample, uniform
 from typing import TYPE_CHECKING
+import traceback
 
 import numpy as np
 from miditok import TokSequence
@@ -165,10 +166,12 @@ class DatasetMMM(DatasetMIDI):
             ],
         )
 
-        self._ac_tracks, self._ac_bars = [], []
+        self._ac_tracks, self._ac_bars, self._ac_bars_wo_pcb = [], [], []
         for i, ac in enumerate(tokenizer.attribute_controls):
             if isinstance(ac, BarAttributeControl):
                 self._ac_bars.append(i)
+                if ac.__class__.__name__ != "BarPitchClass":
+                    self._ac_bars_wo_pcb.append(i)
             else:
                 self._ac_tracks.append(i)
 
@@ -214,11 +217,11 @@ class DatasetMMM(DatasetMIDI):
             return item
         except KeyError:
             metadata = {}
-
         # Tokenize the score
         try:
             tseq, decoder_input_ids = self._tokenize_score(score, metadata)
-        except IndexError:
+        except IndexError as err:
+            traceback.print_tb(err.__traceback__)
             item = {self.sample_key_name: None, self.labels_key_name: None}
             if self.seq2seq:
                 item[self.decoder_key_name] = None
@@ -340,10 +343,7 @@ class DatasetMMM(DatasetMIDI):
                 )
             bar_infilling_end_idx = bar_infilling_start_idx + infill_section_num_bars
 
-            acs_idx = self._ac_bars
-
-            # Remove pitch control
-            del acs_idx[1]
+            acs_idx = self._ac_bars_wo_pcb
 
             # If the track is a drum track, keep only note density attrbiute control
             if score.tracks[track_infilling_idx].is_drum:
@@ -741,8 +741,7 @@ class DatasetMMM(DatasetMIDI):
         else:
           #Move infill_track sequence at the end
           for i, seq in enumerate(sequences):
-              #print(seq.tokens)
-              if seq.tokens[0] == "Infill_Track":  # Check if first token
+              if seq.ids[0] == self._infill_track_token_id:  # Check if first token
                   # is "Infill_Track"
                   sequences.append(sequences.pop(i))  # Move it to the end
                   break  # Stop after the first match

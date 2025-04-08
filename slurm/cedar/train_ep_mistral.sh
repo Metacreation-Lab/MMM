@@ -8,17 +8,18 @@
 #SBATCH --error=logs/train-ep_mistral_err.out
 #SBATCH --account=def-pasquier
 #SBATCH --mail-user=raa60@sfu.ca # Default mail
-#SBATCH --nodes=1            # total nb of nodes
+#SBATCH --nodes=4            # total nb of nodes
 #SBATCH --ntasks-per-node=1  # nb of tasks per node
 #SBATCH --gpus-per-node=v100l:4
-#SBATCH --cpus-per-task=10   # nb of CPU cores per task
-#SBATCH --mem=100G
-#SBATCH --time=3:00:00
+#SBATCH --cpus-per-task=32   # nb of CPU cores per task
+#SBATCH --mem=187G
+#SBATCH --time=72:00:00
 
 # Define args
 MODEL_TRAIN_ARGS=" \
-    --per-device-train-batch-size 16 \
-    --per-device-eval-batch-size 32 \
+    --deepspeed slurm/ds_config.json \
+    --per-device-train-batch-size 4 \
+    --per-device-eval-batch-size 4 \
     --gradient-accumulation-steps 2 \
     --model MMM_ep_mistral \
     "
@@ -50,8 +51,6 @@ export NCCL_DEBUG=WARN
 # https://github.com/huggingface/transformers/issues/5486
 # best explanation: https://stackoverflow.com/questions/62691279/how-to-disable-tokenizers-parallelism-true-false-warning/72926996#72926996
 export TOKENIZERS_PARALLELISM=0
-export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
-export TORCH_COMPILE=0
 
 # Move hugging face dataset from scratch to local file system
 # This is done on every nodes.
@@ -59,21 +58,22 @@ export TORCH_COMPILE=0
 srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/data && cp -r $SCRATCH/data/GigaMIDI $SLURM_TMPDIR/data/"
 
 # Set launcher command with params
-#export LAUNCHER="torchrun \
-#    --nproc_per_node $SLURM_GPUS_PER_NODE \
-#    --nnodes $SLURM_NNODES \
-#    --node_rank $SLURM_PROCID \
-#    --rdzv_endpoint $MASTER_IP:$MASTER_PORT \
-#    --rdzv_backend c10d \
-#    --max_restarts 0 \
-#    --role $SLURMD_NODENAME: \
-#    --tee 3 \
-#    "
+export LAUNCHER="torchrun \
+    --nproc_per_node $SLURM_GPUS_PER_NODE \
+    --nnodes $SLURM_NNODES \
+    --node_rank $SLURM_PROCID \
+    --rdzv_endpoint $MASTER_IP:$MASTER_PORT \
+    --rdzv_backend c10d \
+    --max_restarts 0 \
+    --role $SLURMD_NODENAME: \
+    --tee 3 \
+    "
 # Replace with line below when using one unique node
-export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
+#export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
+#export LAUNCER="deepspeed --num_gpus=$SLURM_GPUS_PER_NODE"
 
 # Load the python environment
-module load gcc arrow/17.0.0 cudacore/.12.6.2 cudacompat/.12.6 # needed since arrow can't be installed in the venv via pip
+module load gcc arrow/17.0.0 cuda/12.2 # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
 # Run the training

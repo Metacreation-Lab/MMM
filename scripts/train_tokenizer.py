@@ -134,6 +134,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="mistral")
+    parser.add_argument("--short", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -144,16 +145,17 @@ if __name__ == "__main__":
         raise ValueError(msg)
     set_seed(model.seed)
 
-    # Train the tokenizer
-    dataset_ = model.create_dataset_from_parquet()["train"]
-    dataset_.shuffle()
-    dataset_ = model.preprocess_dataset(dataset_).select(
-        list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))
-    )
-    iterator = TokTrainingIterator(model.tokenizer, dataset_)
-    print('training')
-    model.tokenizer.train(
-        vocab_size=model.tokenization_config.vocab_size,
-        iterator=iterator,
-    )
+    if not args.short:
+        # Train the tokenizer
+        dataset_ = model.create_dataset_from_parquet()["train"]
+        dataset_.shuffle()
+        dataset_ = model.preprocess_dataset(dataset_).select(
+            list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))
+        )
+        iterator = TokTrainingIterator(model.tokenizer, dataset_)
+        print(f'Training {model.tokenization_config.vocab_size}')
+        model.tokenizer.train(
+            vocab_size=model.tokenization_config.vocab_size,
+            iterator=iterator,
+        )
     model.tokenizer.save(model.tokenizer_path)

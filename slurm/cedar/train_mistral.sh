@@ -3,9 +3,9 @@
 # Inspired from https://github.com/bigscience-workshop/bigscience/blob/7ccf7e42577fe71e88cf8bed3b9ca965c7afb8f7/train/tr11-176B-ml/tr11-176B-ml.slurm
 
 # Set SLURM / hardware environment
-#SBATCH --job-name=train-mistral
-#SBATCH --output=logs/train-mistral.out
-#SBATCH --error=logs/train-mistral_err.out
+#SBATCH --job-name=train-mistral_2
+#SBATCH --output=logs/train-mistral_2.out
+#SBATCH --error=logs/train-mistral_err_2.out
 #SBATCH --account=def-pasquier
 #SBATCH --mail-user=raa60@sfu.ca # Default mail
 #SBATCH --nodes=1            # total nb of nodes
@@ -13,7 +13,7 @@
 #SBATCH --gpus-per-node=v100l:4
 #SBATCH --cpus-per-task=10   # nb of CPU cores per task
 #SBATCH --mem=100G
-#SBATCH --time=72:00:00
+#SBATCH --time=12:00:00
 
 # Define args
 MODEL_TRAIN_ARGS=" \
@@ -21,7 +21,7 @@ MODEL_TRAIN_ARGS=" \
     --per-device-train-batch-size 16 \
     --per-device-eval-batch-size 32 \
     --gradient-accumulation-steps 2 \
-    --model MMM_mistral \
+    --model MMM_11M_mistral_2 \
     "
 
 # Output GPUs and ram info
@@ -39,7 +39,7 @@ echo "Master addr: $MASTER_IP"
 echo "Node list: $SLURM_JOB_NODELIST"
 
 # Defining the right environment variables
-export PYTHONPATH=$SCRATCH/MMM
+export PYTHONPATH=$PYTHONPATH:$SCRATCH/MMM
 export HF_HOME=$SLURM_TMPDIR/.hf_cache
 export HF_METRICS_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
@@ -51,6 +51,8 @@ export NCCL_DEBUG=WARN
 # https://github.com/huggingface/transformers/issues/5486
 # best explanation: https://stackoverflow.com/questions/62691279/how-to-disable-tokenizers-parallelism-true-false-warning/72926996#72926996
 export TOKENIZERS_PARALLELISM=0
+export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
+export TORCH_COMPILE=0
 
 # Move hugging face dataset from scratch to local file system
 # This is done on every nodes.
@@ -72,7 +74,7 @@ srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/dat
 export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
 
 # Load the python environment
-module load gcc arrow/17.0.0  # needed since arrow can't be installed in the venv via pip
+module load gcc arrow/17.0.0 cudacore/.12.6.2 cudacompat/.12.6 # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
 # Run the training

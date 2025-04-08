@@ -110,6 +110,7 @@ from .constants import (
     USE_MPS,
     VALID_DELAY,
     VOCAB_SIZE,
+    VOCAB_SIZE_SMALL,
     WARMUP_RATIO,
     WEIGHT_DECAY,
 )
@@ -174,7 +175,7 @@ class MMM(Baseline):
             try:
                 return load_dataset(
                     str(self.dataset_path),
-                    "all-instruments-with-drums",
+                    self.version,
                     subsets=self.data_config.subsets_names,
                     trust_remote_code=True,
                 )
@@ -193,7 +194,8 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path(os.getenv("SCRATCH"), "data", self.dataset)
+        #dataset_path = Path(os.getenv("SCRATCH"), "data", self.dataset)
+        dataset_path = self.dataset_path
         version = self.version
 
         try:
@@ -256,7 +258,6 @@ class MMM(Baseline):
 
         :param dataset: ``datasets.Dataset`` to process.
         """
-        print(dataset[0])
         return dataset.filter(
             lambda ex: is_score_valid(
                 ex["music"], MIN_NUM_BARS_FILE_VALID, MIN_NUM_NOTES_FILE_VALID
@@ -268,7 +269,7 @@ class MMM(Baseline):
         return DataCollator(
             self.pad_token_id,
             pad_on_left=pad_on_left,
-            shift_labels=self.seq2seq,
+            shift_labels=self.seq2seq
         )
 
     def create_model(self, pretrained: str | None = None) -> PreTrainedModel:
@@ -357,13 +358,13 @@ tok_config = TokenizationConfig(
     "MMM", TokenizerConfig(**deepcopy(TOKENIZER_PARAMS)), VOCAB_SIZE
 )
 exp_tok_config = TokenizationConfig(
-    "MMM", TokenizerConfig(**deepcopy(EXP_TOKENIZER_PARAMS)), VOCAB_SIZE
+    "MMM", TokenizerConfig(**deepcopy(EXP_TOKENIZER_PARAMS)), VOCAB_SIZE_SMALL
 )
 exp_loop_tok_config = TokenizationConfig(
-    "MMM", TokenizerConfig(**deepcopy(EXP_LOOP_TOKENIZER_PARAMS)), VOCAB_SIZE
+    "MMM", TokenizerConfig(**deepcopy(EXP_LOOP_TOKENIZER_PARAMS)), VOCAB_SIZE_SMALL
 )
 mistral_config = MistralConfig(
-    vocab_size=VOCAB_SIZE,
+    vocab_size=VOCAB_SIZE_SMALL,
     hidden_size=EMBEDDING_SIZE,
     intermediate_size=FEEDFORWARD_SIZE,
     num_hidden_layers=NUM_LAYERS,
@@ -377,6 +378,7 @@ mistral_config = MistralConfig(
 
 # Vocab size is the size of base vocabulary of the tokenizer
 mistral_small_config = MistralConfig(
+    vocab_size=VOCAB_SIZE_SMALL,
     hidden_size=EMBEDDING_SIZE_SMALL,
     intermediate_size=FEEDFORWARD_SIZE_SMALL,
     num_hidden_layers=NUM_LAYERS_SMALL,
@@ -387,8 +389,19 @@ mistral_small_config = MistralConfig(
     attn_implementation=attn_implem,
     torch_dtype=dtype,
 )
+gpt2_small_config = GPT2Config(
+    vocab_size=VOCAB_SIZE_SMALL,
+    n_positions=MAX_POSITION_EMBEDDINGS_SMALL,
+    n_embd=EMBEDDING_SIZE_SMALL,
+    n_layer=NUM_LAYERS_SMALL,
+    n_head=NUM_ATTENTION_HEADS_SMALL,
+    n_inner=FEEDFORWARD_SIZE_SMALL,
+    attn_implementation=attn_implem,
+    torch_dtype=dtype,
+)
+
 gpt2_config = GPT2Config(
-    vocab_size=VOCAB_SIZE,
+    vocab_size=VOCAB_SIZE_SMALL,
     n_positions=MAX_POSITION_EMBEDDINGS,
     n_embd=EMBEDDING_SIZE,
     n_layer=NUM_LAYERS,
@@ -445,7 +458,7 @@ mmm_ep_mistral = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
-    "v4.0.0"
+    "v2.0.0"
 )
 
 mmm_epl_mistral = MMM(
@@ -457,19 +470,31 @@ mmm_epl_mistral = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
-    "v4.0.0"
+    "v2.0.0"
 )
 
 mmm_ep_gpt2 = MMM(
     "MMM_ep_gpt2",
     "GigaMIDI",
     SEED,
-    deepcopy(tok_config),
+    deepcopy(exp_tok_config),
     deepcopy(gpt2_config),
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
-    "v4.0.0"
+    "v3.0.0"
+)
+
+mmm_epl_gpt2 = MMM(
+    "MMM_epl_gpt2",
+    "GigaMIDI",
+    SEED,
+    deepcopy(exp_loop_tok_config),
+    deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v2.0.0"
 )
 
 mmm_gpt2 = MMM(
@@ -483,7 +508,7 @@ mmm_gpt2 = MMM(
     deepcopy(generation_config),
 )
 
-mmm_small_gpt2 = MMM(
+mmm_small_mistral = MMM(
     "MMM_11M_mistral",
     "GigaMIDI",
     SEED,
@@ -492,6 +517,18 @@ mmm_small_gpt2 = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
+)
+
+mmm_small_mistral_2 = MMM(
+    "MMM_11M_mistral_2",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(mistral_small_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "all-instruments-with-drums"
 )
 
 mmm_t5 = MMM(
@@ -506,4 +543,4 @@ mmm_t5 = MMM(
 )
 mmm_t5.seq2seq = True
 
-baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_gpt2, mmm_ep_mistral, mmm_epl_mistral, mmm_small_gpt2]}
+baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_ep_gpt2, mmm_ep_mistral, mmm_epl_mistral, mmm_small_mistral, mmm_small_mistral_2]}
