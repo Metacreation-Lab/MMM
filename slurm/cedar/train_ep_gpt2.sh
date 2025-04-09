@@ -18,10 +18,9 @@
 # Define args
 MODEL_TRAIN_ARGS=" \
     --deepspeed slurm/ds_config.json \
-    --per-device-train-batch-size 8 \
-    --per-device-eval-batch-size 16 \
+    --per-device-train-batch-size 4 \
+    --per-device-eval-batch-size 4 \
     --gradient-accumulation-steps 2 \
-    --eval_steps 100 \
     --model MMM_ep_gpt2 \
     "
 
