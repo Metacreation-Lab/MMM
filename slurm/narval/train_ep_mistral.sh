@@ -9,17 +9,19 @@
 #SBATCH --account=def-pasquier
 #SBATCH --mail-user=paul_triana@sfu.ca # Default mail
 #SBATCH --nodes=1            # total nb of nodes
-#SBATCH --ntasks-per-node=1  # nb of tasks per node
+#SBATCH --ntasks-per-node=1   # nb of tasks per node
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=32   # nb of CPU cores per task
-#SBATCH --mem=100G
+#SBATCH --cpus-per-task=24   # nb of CPU cores per task
+#SBATCH --mem=310000M
 #SBATCH --time=3:00:00
+
+module purge
 
 # Define args
 MODEL_TRAIN_ARGS=" \
     --deepspeed slurm/ds_config.json \
-    --per-device-train-batch-size 64 \
-    --per-device-eval-batch-size 128 \
+    --per-device-train-batch-size 32 \
+    --per-device-eval-batch-size 64 \
     --left_padding \
     --model MMM_ep_mistral \
     "
@@ -51,12 +53,16 @@ export NCCL_DEBUG=WARN
 # https://github.com/huggingface/transformers/issues/5486
 # best explanation: https://stackoverflow.com/questions/62691279/how-to-disable-tokenizers-parallelism-true-false-warning/72926996#72926996
 export TOKENIZERS_PARALLELISM=0
+export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
 
 # Move hugging face dataset from scratch to local file system
 # This is done on every nodes.
 # Docs: https://docs.alliancecan.ca/wiki/Using_node-local_storage
 srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/data && cp -r $SCRATCH/data/GigaMIDI $SLURM_TMPDIR/data/"
 
+SINGLE_NODE=1
+if [[ "$SLURM_NNODES" -gt "$SINGLE_NODE" ]]
+then
 # Set launcher command with params
 export LAUNCHER="torchrun \
     --nproc_per_node $SLURM_GPUS_PER_NODE \
@@ -68,8 +74,10 @@ export LAUNCHER="torchrun \
     --role $SLURMD_NODENAME: \
     --tee 3 \
     "
+else
 # Replace with line below when using one unique node
 export LAUNCHER="torchrun --nproc_per_node $SLURM_GPUS_PER_NODE"
+fi
 
 # Load the python environment
 module load gcc arrow/17.0.0 cuda/12.2  # needed since arrow can't be installed in the venv via pip

@@ -122,7 +122,6 @@ if TYPE_CHECKING:
 
 
 attn_implem = "flash_attention_2" if "flash_attn" in sys.modules else None
-attn_implem = None
 dtype = torch.bfloat16 if BF16 else torch.float16 if FP16 else torch.float32
 
 
@@ -496,7 +495,7 @@ mmm_epl_gpt2 = MMM(
     deepcopy(training_config_kwargs),
     deepcopy(data_config),
     deepcopy(generation_config),
-    "v2.0.0"
+    "v3.0.0"
 )
 
 mmm_gpt2 = MMM(

@@ -1,17 +1,5 @@
 #!/bin/bash
 
-# Set SLURM / hardware environment
-#SBATCH --job-name=install
-#SBATCH --output=logs/install.out
-#SBATCH --error=logs/install_err.out
-#SBATCH --account=def-pasquier
-#SBATCH --mail-user=raa60@sfu.ca # Default mail
-#SBATCH --nodes=1            # total nb of nodes
-#SBATCH --ntasks-per-node=1  # nb of tasks per node
-#SBATCH --cpus-per-task=10   # nb of CPU cores per task
-#SBATCH --mem=30G
-#SBATCH --time=3:00:00
-
 echo "START TIME: $(date)"
 
 VENV=".venv/"
@@ -34,6 +22,7 @@ pip install flash_attn==2.5.7 -vv
 pip install deepspeed==0.14.4 -vv
 pip install datasets==3.3.2 -vv
 pip install triton==3.1.0 -vv
+pip install nvitop
 pip install .
 pip freeze
 

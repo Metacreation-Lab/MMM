@@ -140,7 +140,7 @@ class DatasetMMM(DatasetMIDI):
         self._track_end_token_id = tokenizer.vocab["Track_End"]
         self._bar_token_id = tokenizer.vocab["Bar_None"]
         try:
-            self.inject_loops = tokenizer.use_loops
+            self.inject_loops = tokenizer.base_tokenizer.use_loops
         except:
             self.inject_loops = False
         if self.inject_loops:
@@ -400,8 +400,8 @@ class DatasetMMM(DatasetMIDI):
             # If tracks and nomml don't match, abandon microtiming
             if max_nomml > max_nomml_microtiming - 1 and len(metadata["nomml"]) == len(score.tracks):
                 use_microtiming = True
-        self.tokenizer.base_tokenizer.use_microtiming = use_microtiming
-
+        #self.tokenizer.base_tokenizer.use_microtiming = use_microtiming
+        self.tokenizer.base_tokenizer._update_microtiming(use_microtiming)
         loops = [] 
         if "loops" in metadata.keys():
             if type(metadata["loops"]) == dict:
@@ -433,6 +433,8 @@ class DatasetMMM(DatasetMIDI):
             "tpq":old_tpq,
             "loops":loops
         }
+
+        #print("metadata_encode", metadata_encode)
 
         # Tokenize it
         sequences = self.tokenizer.encode(
@@ -785,7 +787,7 @@ class DatasetMMM(DatasetMIDI):
                 choice(self.velocity_offsets),
                 choice(self.duration_offsets),
             )
-        return self.tokenizer.preprocess_score(score)
+        return self.tokenizer.base_tokenizer.preprocess_score(score)
 
     def __len__(self) -> int:
         """

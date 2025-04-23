@@ -3,9 +3,9 @@
 # Inspired from https://github.com/bigscience-workshop/bigscience/blob/7ccf7e42577fe71e88cf8bed3b9ca965c7afb8f7/train/tr11-176B-ml/tr11-176B-ml.slurm
 
 # Set SLURM / hardware environment
-#SBATCH --job-name=train-epl_mistral
-#SBATCH --output=logs/train-epl_mistral.out
-#SBATCH --error=logs/train-epl_mistral_err.out
+#SBATCH --job-name=train-epl_gpt2l
+#SBATCH --output=logs/train-epl_gpt2.out
+#SBATCH --error=logs/train-epl_gpt2_err.out
 #SBATCH --account=def-pasquier
 #SBATCH --mail-user=paul_triana@sfu.ca # Default mail
 #SBATCH --nodes=1            # total nb of nodes
@@ -13,7 +13,7 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=46   # nb of CPU cores per task
 #SBATCH --mem=510000M
-#SBATCH --time=3-00:00:00
+#SBATCH --time=03:00:00
 
 module purge
 
@@ -22,9 +22,7 @@ MODEL_TRAIN_ARGS=" \
     --deepspeed slurm/ds_config.json \
     --per-device-train-batch-size 32 \
     --per-device-eval-batch-size 64 \
-    --gradient-accumulation-steps 2 \
-    --left_padding \
-    --model MMM_epl_mistral \
+    --model MMM_epl_gp2 \
     "
 
 # Output GPUs and ram info
@@ -83,27 +81,6 @@ fi
 # Load the python environment
 module load gcc arrow/17.0.0 cuda/12.2  # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
-
-# Canceling identical running jobs
-# Get current user
-USER_NAME=$(whoami)
-
-# Get matching job IDs for jobs with the same name and user
-JOB_IDS=$(squeue -u "$USER_NAME" --name "$SBATCH_JOB_NAME" --noheader --format="%A")
-
-# Check if any job was found
-if [[ -n "$JOB_IDS" ]]; then
-    echo "Found running job(s) with name '$JOB_NAME':"
-    echo "$JOB_IDS"
-
-    # Cancel each found job
-    for jobid in $JOB_IDS; do
-        echo "Cancelling job ID: $jobid"
-        scancel "$jobid"
-    done
-else
-    echo "No running jobs found with name '$JOB_NAME'."
-fi
 
 # Run the training
 # Tensorboard can be access by running (with computenode replaced with the node hostname):

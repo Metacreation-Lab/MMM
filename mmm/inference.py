@@ -14,7 +14,7 @@ from symusic import Score
 from torch import LongTensor
 from transformers import LogitsProcessorList
 
-from .logits_processor import StopLogitsProcessor
+from .logits_processor import InfillLogitsProcessor, TrackLogitsProcessor
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -49,12 +49,11 @@ def generate(
         Score(score_or_path) if not isinstance(score_or_path, Score) else score_or_path
     )
 
-    logits_processor = StopLogitsProcessor(
-        tokenizer.vocab["Bar_None"], tokenizer.vocab["FillBar_End"], tokenizer
-    )
-
     # Infill bars
     if inference_config.infilling:
+        logits_processor = InfillLogitsProcessor(
+            tokenizer.vocab["Bar_None"], tokenizer.vocab["FillBar_End"], tokenizer
+        )
         score, metadata = generate_infilling(
             model, tokenizer, inference_config, logits_processor,
             generate_kwargs, deepcopy(input_tokens)
@@ -62,8 +61,11 @@ def generate(
 
     # Generate new tracks
     if inference_config.autoregressive:
+        logits_processor = TrackLogitsProcessor(
+            tokenizer.vocab["Track_Start"], tokenizer.vocab["Bar_None"], tokenizer.vocab["Track_End"]
+        )
         for track in inference_config.new_tracks:
-            score, metadata = generate_new_track(model, tokenizer, track, generate_kwargs)
+            score, metadata = generate_new_track(model, tokenizer, track, score, logits_processor, generate_kwargs)
 
     return score, metadata
 
@@ -73,6 +75,7 @@ def generate_new_track(
     tokenizer: MMM,
     track: tuple[int, list[str]],
     score: Score,
+    logits_processor: TrackLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
 ) -> tuple[Score, dict]:
     """
@@ -92,7 +95,10 @@ def generate_new_track(
     """
     if not generate_kwargs:
         generate_kwargs = {}
-
+    else:
+        generate_kwargs["generation_config"].eos_token_id = tokenizer.vocab[
+            "Track_End"
+        ]
     # In this case, the prompt is a toksequence containing all the tracks
     input_seq = tokenizer.encode(score)
 
@@ -107,7 +113,14 @@ def generate_new_track(
         input_seq.ids.append(tokenizer.vocab[control])
         input_seq.tokens.append(control)
 
-    output_ids = model.generate(LongTensor([input_seq.ids]), **generate_kwargs)
+    logit_processor_list = LogitsProcessorList()
+    logit_processor_list.append(logits_processor)
+
+    output_ids = model.generate(
+        LongTensor([input_seq.ids]), 
+        logits_processor=logit_processor_list,
+        **generate_kwargs
+    )
     output_seq = TokSequence(ids=output_ids[0].tolist(), are_ids_encoded=True)
 
     # Remove attribute controls from the sequence
@@ -119,6 +132,9 @@ def generate_new_track(
     tokenizer.decode_token_ids(output_seq)
     output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
 
+    print("after_gen")
+    print(output_seq.tokens)
+
     # It is expected to have a <TRACK_END> token at the end of the sequence.
     if output_seq.tokens[-1] != "Track_End":
         warnings.warn(
@@ -129,6 +145,7 @@ def generate_new_track(
         output_seq.tokens.append("Track_End")
 
     result, metadata = tokenizer._tokens_to_score(output_seq)
+    print(metadata)
     return result, metadata
 
 
@@ -136,7 +153,7 @@ def generate_infilling(
     model: object,
     tokenizer: MMM,
     inference_config: InferenceConfig,
-    logits_processor: StopLogitsProcessor | None = None,
+    logits_processor: InfillLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
     input_tokens: TokSequence | list[TokSequence]  = None
 ) -> tuple[Score, dict]:
@@ -167,34 +184,6 @@ def generate_infilling(
 
     tracks_to_infill = inference_config.bars_to_generate.keys()
 
-    start_time = time.time()
-    #input_tokens = tokenizer.encode(score, concatenate_track_sequences=False)
-
-    """
-    Just for debugging purposes
-    print_input_tokens = tokenizer.encode(score)
-
-    tokenizer.decode_token_ids(print_input_tokens)
-    with open("original_tokens.txt", "w") as file:
-        bar_n = 0
-        track_n = 0
-        for token in print_input_tokens.tokens:
-            if token == "Track_End":
-                bar_n = 0
-                track_n += 1
-            if token == "Bar_None":
-                file.write(f"TrackNumber:{track_n} BarNumber:{bar_n} " + token + "\n")
-                bar_n += 1
-            else:
-                file.write(token + "\n")
-    """
-
-    end_time = time.time()
-    print(
-        "[INFO::generate_infilling] Time spent for converting score to tokens: ",
-        end_time - start_time,
-    )
-
     for track_to_infill in tracks_to_infill:
         infill_bars(
             model,
@@ -224,7 +213,7 @@ def infill_bars(
     track_idx: int,
     inference_config: InferenceConfig,
     tokens: list[TokSequence],
-    logits_processor: StopLogitsProcessor | None = None,
+    logits_processor: InfillLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
 ) -> None:
     """
