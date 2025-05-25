@@ -5,13 +5,15 @@ from __future__ import annotations
 import re
 import time
 import warnings
+import logging
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import numpy as np
 from miditok import MMM, TokSequence
+from miditok.pytorch_data import DataCollator
 from symusic import Score
-from torch import LongTensor
+from torch import LongTensor, no_grad, inference_mode
 from transformers import LogitsProcessorList
 
 from .logits_processor import InfillLogitsProcessor, TrackLogitsProcessor
@@ -22,17 +24,17 @@ if TYPE_CHECKING:
 
     from .config import InferenceConfig
 
-
 def generate(
     model: object,
     tokenizer: MMM,
     inference_config: InferenceConfig,
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
-    input_tokens: TokSequence | list[TokSequence] = None
+    input_tokens: TokSequence | list[TokSequence] = None,
+    device: str = None
 ) -> tuple[Score, dict]:
     """
-    Use the model to generate new music content.
+    Use the model to generate a batch of new music content.
 
     The method allows to infill specific bars or generate new tracks.
 
@@ -64,10 +66,93 @@ def generate(
         logits_processor = TrackLogitsProcessor(
             tokenizer.vocab["Track_Start"], tokenizer.vocab["Bar_None"], tokenizer.vocab["Track_End"]
         )
+        metadata = {}
         for track in inference_config.new_tracks:
-            score, metadata = generate_new_track(model, tokenizer, track, score, logits_processor, generate_kwargs)
+            logging.debug("Generating Track")
+            logging.debug(track[-1])
+            score, metadata = generate_new_track(model, tokenizer, track, score, metadata, logits_processor, generate_kwargs, device)
+            logging.debug(metadata)
 
     return score, metadata
+
+
+def generate_batch(
+    model: object,
+    tokenizer: MMM,
+    collator: DataCollator,
+    inputs: list[dict[str, InferenceConfig | Score]],
+    generate_kwargs: Mapping | None = None,
+    device: str = None
+) -> tuple[Score, dict]:
+    """
+    Use the model to generate new music content.
+
+    The method allows to infill specific bars or generate new tracks.
+
+    :param model: model used for generation
+    :param tokenizer: MMM tokenizer
+    :param inference_config: InferenceConfig
+    :param score_or_path: ``symusic.Score`` or path of the music file to infill.
+    :param generate_kwargs: keyword arguments to provide to the ``model.generate``
+        method. For Hugging Face models for example, you can provide a
+        ``GenerationConfig`` using this argument.
+    :return: the infilled ``symusic.Score`` object and metadata (eg. loops).
+    """
+
+    # Infill bars
+    if all(i["config"].infilling for i in inputs):
+        raise NotImplementedError("Batch sampling doesn't support infilling")
+
+    # Generate new tracks
+    elif all(i["config"].autoregressive for i in inputs):
+        logits_processor = TrackLogitsProcessor(
+            tokenizer.vocab["Track_Start"], tokenizer.vocab["Bar_None"], tokenizer.vocab["Track_End"]
+        )
+
+        batch_size = len(inputs)
+
+        # Track current state for each item in batch
+        current_scores = [i["score"] for i in inputs]          # list of mutable score strings
+        current_metadatas = len(inputs) * [{}]
+        configs = [i["config"] for i in inputs]                   # list of config objects
+        max_tracks = max(len(cfg.new_tracks) for cfg in configs)
+
+        for step in range(max_tracks):
+            step_batch = []
+            step_indices = []
+
+            for i in range(batch_size):
+                cfg = configs[i]
+                if step < len(cfg.new_tracks):
+                    # Prepare (score, metadata, track) for this step
+                    step_batch.append((current_scores[i], current_metadatas[i], cfg.new_tracks[step]))
+                    step_indices.append(i)
+
+            if not step_batch:
+                break  # All tracks completed
+
+            # Run batch generation for this step
+            step_results = generate_new_track_batch(
+                model, tokenizer, collator, step_batch, logits_processor, generate_kwargs, device
+            )
+
+            # Update scores and metadatas in-place
+            for idx, (new_score, new_metadata) in zip(step_indices, step_results):
+                current_scores[idx] = new_score
+                current_metadatas[idx] = new_metadata
+
+        return [
+            {
+                "score": current_scores[i],
+                "metadata": current_metadatas[i]
+            } 
+            for i in range(batch_size)
+        ]
+
+    else:
+        raise ValueError("All configurations must have the same sampling types")
+
+    #return score, metadata
 
 
 def generate_new_track(
@@ -75,8 +160,10 @@ def generate_new_track(
     tokenizer: MMM,
     track: tuple[int, list[str]],
     score: Score,
+    metadata: dict,
     logits_processor: TrackLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
+    device: str = None
 ) -> tuple[Score, dict]:
     """
     Generate a new track of a given Score.
@@ -95,12 +182,16 @@ def generate_new_track(
     """
     if not generate_kwargs:
         generate_kwargs = {}
+        max_len = 100000
     else:
         generate_kwargs["generation_config"].eos_token_id = tokenizer.vocab[
             "Track_End"
         ]
+        max_len = generate_kwargs["generation_config"].max_length
+
     # In this case, the prompt is a toksequence containing all the tracks
-    input_seq = tokenizer.encode(score)
+    metadata["tpq"] = score.ticks_per_quarter
+    input_seq = tokenizer.encode(score, metadata=metadata)
 
     # Add <TRACK_START> and <PROGRAM> tokens
     input_seq.ids.append(tokenizer.vocab["Track_Start"])
@@ -112,28 +203,45 @@ def generate_new_track(
     for control in track[1]:
         input_seq.ids.append(tokenizer.vocab[control])
         input_seq.tokens.append(control)
+    control_len = len(track[1])
+
+    if len(input_seq) >= max_len - 1024:
+        len_trim = len(input_seq) + 1024 - max_len
+        input_seq_trimmed = input_seq[len_trim:]
+    else:
+        len_trim = 0
+        input_seq_trimmed = input_seq
 
     logit_processor_list = LogitsProcessorList()
     logit_processor_list.append(logits_processor)
 
-    output_ids = model.generate(
-        LongTensor([input_seq.ids]), 
-        logits_processor=logit_processor_list,
-        **generate_kwargs
-    )
+    input_tensor = LongTensor([input_seq_trimmed.ids])
+    if device:
+        input_tensor = input_tensor.to(device=device)
+
+    with no_grad():
+        output_ids = model.generate(
+            input_tensor, 
+            logits_processor=logit_processor_list,
+            **generate_kwargs
+        )
     output_seq = TokSequence(ids=output_ids[0].tolist(), are_ids_encoded=True)
 
     # Remove attribute controls from the sequence
     output_seq = (
-        output_seq[: len(input_seq)] + output_seq[len(input_seq) + len(track[1]) :]
+        input_seq[:-control_len] + output_seq[len(input_seq) - len_trim + control_len:]
     )
 
     # Decode BPE ids before getting the associated tokens
     tokenizer.decode_token_ids(output_seq)
     output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
 
-    print("after_gen")
-    print(output_seq.tokens)
+    #print("after_gen")
+    #logging.debug("After Generation")
+    #for tok in output_seq.tokens:
+    #    logging.debug(tok)
+    #logging.debug(output_seq.tokens)
+    #print(output_seq.tokens)
 
     # It is expected to have a <TRACK_END> token at the end of the sequence.
     if output_seq.tokens[-1] != "Track_End":
@@ -145,9 +253,121 @@ def generate_new_track(
         output_seq.tokens.append("Track_End")
 
     result, metadata = tokenizer._tokens_to_score(output_seq)
-    print(metadata)
+    #print(metadata)
     return result, metadata
 
+def generate_new_track_batch(
+    model: object,
+    tokenizer: MMM,
+    collator: DataCollator,
+    scores_tracks: list[tuple[Score, dict, tuple[int, list[str]]]],
+    logits_processor: TrackLogitsProcessor | None = None,
+    generate_kwargs: Mapping | None = None,
+    device: str = None
+) -> tuple[Score, dict]:
+    """
+    Generate a new track of a given Score.
+
+    The new track will be added to the score.
+
+    :param model: model used for generation
+    :param tokenizer: MMM tokenizer
+    :param track: tuple containing the program of the track and a list of Track
+        Attribute Controls.
+    :param score: symusic.Score
+    :param generate_kwargs: keyword arguments to provide to the ``model.generate``
+        method. For Hugging Face models for example, you can provide a
+        ``GenerationConfig`` using this argument.
+    :return: the infilled ``symusic.Score`` object.
+    """
+    if generate_kwargs is None:
+        generate_kwargs = {}
+        max_len = 100000
+    else:
+        generate_kwargs["generation_config"].eos_token_id = tokenizer.vocab["Track_End"]
+        max_len = generate_kwargs["generation_config"].max_length
+
+    input_seqs = []
+    input_ids_batch = []
+
+    for score, metadata, track in scores_tracks:
+        program, controls = track
+
+        # Build input sequence for this track
+        input_seq = tokenizer.encode(score, metadata=metadata)
+
+        # Append special tokens
+        input_seq.ids.append(tokenizer.vocab["Track_Start"])
+        input_seq.tokens.append("Track_Start")
+        input_seq.ids.append(tokenizer.vocab[f"Program_{program}"])
+        input_seq.tokens.append(f"Program_{program}")
+
+        for control in controls:
+            input_seq.ids.append(tokenizer.vocab[control])
+            input_seq.tokens.append(control)
+
+        if len(input_seq) >= max_len - 1024:
+            len_trim = len(input_seq) + 1024 - max_len
+            input_seq_trimmed = input_seq[len_trim:]
+            #input_seq = input_seq[:max_len - 1024]
+        else:
+            len_trim = 0
+            input_seq_trimmed = input_seq
+
+        input_seqs.append((input_seq, len(controls), len_trim))  # Save original seq + control len
+        input_ids_batch.append(LongTensor(input_seq_trimmed.ids))
+
+
+    input_name = collator.inputs_kwarg_name
+    batch = [{
+        input_name:input_ids
+    } for input_ids in input_ids_batch]
+
+    padded_batch = collator(batch)[input_name]
+
+    if device:
+        input_tensor = padded_batch.to(device=device)
+
+    # Use shared logit processor for all sequences
+    logit_processor_list = LogitsProcessorList()
+    logit_processor_list.append(logits_processor)
+
+    with inference_mode():
+        output_ids_batch = model.generate(
+            input_tensor,
+            logits_processor=logit_processor_list,
+            **generate_kwargs
+        )
+
+    results = []
+    for output_ids, (input_seq, control_len, len_trim) in zip(output_ids_batch, input_seqs):
+        output_seq = TokSequence(ids=output_ids.tolist(), are_ids_encoded=True)
+
+        # Remove attribute controls
+        # output_seq = (
+        #     output_seq[:len(input_seq)] + output_seq[len(input_seq) + control_len:]
+        # )
+
+        output_seq = (
+            input_seq[:-control_len] + output_seq[len(input_seq) - len_trim + control_len:]
+        )
+
+        tokenizer.decode_token_ids(output_seq)
+        output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
+
+        # Ensure <TRACK_END>
+        if output_seq.tokens[-1] != "Track_End":
+            warnings.warn(
+                "Track generation failed: missing <TRACK_END>",
+                stacklevel=2,
+            )
+            output_seq.ids.append(tokenizer.vocab["Track_End"])
+            output_seq.tokens.append("Track_End")
+
+        result, metadata = tokenizer._tokens_to_score(output_seq)
+        results.append((result, metadata))
+
+    return results  # List of (result, metadata)
 
 def generate_infilling(
     model: object,
@@ -155,7 +375,8 @@ def generate_infilling(
     inference_config: InferenceConfig,
     logits_processor: InfillLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
-    input_tokens: TokSequence | list[TokSequence]  = None
+    input_tokens: TokSequence | list[TokSequence]  = None,
+    device: str = None
 ) -> tuple[Score, dict]:
     """
     Generate a new portion of a ``symusic.Score``.
@@ -193,6 +414,7 @@ def generate_infilling(
             input_tokens,
             logits_processor,
             generate_kwargs,
+            device
         )
 
     # Here we use the base tokenizer because output_tokens is a list of TokSequences
@@ -215,6 +437,7 @@ def infill_bars(
     tokens: list[TokSequence],
     logits_processor: InfillLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
+    device: str = None
 ) -> None:
     """
     Infill bars for the ''track_idx'' track.
@@ -265,8 +488,12 @@ def infill_bars(
 
         start_time = time.time()
 
+        input_tensor = LongTensor([input_seq.ids])
+        if device:
+            input_tensor = input_tensor.to(device=device)
+
         output_ids = model.generate(
-            LongTensor([input_seq.ids]),
+            input_tensor,
             logits_processor=logit_processor_list,
             **generate_kwargs,
         )[0].numpy()
@@ -507,11 +734,3 @@ def _adapt_prompt_for_infilling(
                 file.write(token + "\n")
 
     return output_toksequence, token_idx_start, token_idx_end
-
-def _adapt_prompt_for_track_infilling(
-    tokenizer: MMM,
-    track_idx: int,
-    tokens: list[TokSequence],
-    subset_bars_to_infill: tuple[int, int, list[str]],
-) -> TokSequence:
-    pass

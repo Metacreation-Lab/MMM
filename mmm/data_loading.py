@@ -221,6 +221,18 @@ class DatasetMMM(DatasetMIDI):
         try:
             tseq, decoder_input_ids = self._tokenize_score(score, metadata)
         except IndexError as err:
+            #traceback.print_tb(err.__traceback__)
+            item = {self.sample_key_name: None, self.labels_key_name: None}
+            if self.seq2seq:
+                item[self.decoder_key_name] = None
+            return item
+        except KeyError as err:
+            #traceback.print_tb(err.__traceback__)
+            item = {self.sample_key_name: None, self.labels_key_name: None}
+            if self.seq2seq:
+                item[self.decoder_key_name] = None
+            return item
+        except Exception as err:
             traceback.print_tb(err.__traceback__)
             item = {self.sample_key_name: None, self.labels_key_name: None}
             if self.seq2seq:

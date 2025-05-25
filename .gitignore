@@ -9,3 +9,8 @@ __pycache__
 /debug
 /tests/output
 /tests/test_midis
+
+logs/*
+CCLOG/*
+models/*
+runs/*

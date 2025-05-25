@@ -298,9 +298,9 @@ training_config_kwargs = {
     "output_dir": "",  # overridden by Baseline class
     "overwrite_output_dir": False,
     "do_train": True,
-    "do_eval": True,
+    "do_eval": False,
     "do_predict": False,
-    "eval_strategy": EVAL_STRATEGY,
+    "eval_strategy": "no",
     "eval_steps": EVAL_STEPS,
     "per_device_train_batch_size": BATCH_SIZE_PER_DEVICE_TRAIN,
     "per_device_eval_batch_size": BATCH_SIZE_PER_DEVICE_VALID,
