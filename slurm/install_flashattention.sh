@@ -29,7 +29,7 @@ free -m
 module purge
 module load cuda
 source .venv/bin/activate
-cd $HOME/flash-attention
+cd $SCRATCH/flash-attention
 pip install .
 
 echo "END TIME: $(date)"

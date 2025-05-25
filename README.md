@@ -88,6 +88,12 @@ python scripts/train_tokenizer.py
 python scripts/train_model.py
 ```
 
+## Pretrained model for inference
+Download the model here:
+https://drive.google.com/file/d/1Up6OxUANSUcBipPz_V9hLj6EiFTPCmiO/view?usp=sharing
+
+Use generate.py to generate samples using the mentioned model.
+
 ## Data preprocessing
 
 1. Filter non-valid files: corrupted or less than 8 bars;

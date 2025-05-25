@@ -21,9 +21,9 @@ class InferenceConfig:
         the new tracks
     """
 
-    bars_to_generate: dict[int, list[tuple[int, int, list[str]]]] | None = None
-    new_tracks: list[tuple[int, list[str]]] | None = None
     context_length: int = 4
+    bars_to_generate: dict[int, list[tuple[int, int, list[str], str]]] | None = None
+    new_tracks: list[tuple[int, list[str]]] | None = None
     autoregressive: bool = False
     infilling: bool = False
 

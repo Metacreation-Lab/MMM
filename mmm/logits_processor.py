@@ -8,8 +8,33 @@ import torch
 from miditok import TokSequence
 from transformers import LogitsProcessor
 
+class TrackLogitsProcessor(LogitsProcessor):
 
-class StopLogitsProcessor(LogitsProcessor):
+    def __init__(
+        self,
+        track_start_token_id: int,
+        bar_start_token_id: int,
+        eos_token_id: int,
+    ) -> None:
+        self.track_start_token_id = track_start_token_id
+        self.bar_start_token_id = bar_start_token_id
+        self.eos_token_id = eos_token_id
+        self.total_time = 0
+
+    def __call__(
+        self, input_ids: torch.LongTensor, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        start_time = time.time()
+
+        # Only generating one track
+        scores[:, self.track_start_token_id] = -999999.0
+
+        end_time = time.time()
+        self.total_time += end_time - start_time
+        return scores
+
+
+class InfillLogitsProcessor(LogitsProcessor):
     """
 
     Custom ``transformers.LogitsProcessor`` implementation.
@@ -27,12 +52,13 @@ class StopLogitsProcessor(LogitsProcessor):
     # step as we may need to infill a different number of bars at each step
     n_attribute_controls: int = 0  # Number of attribute controls to skip
     # when decoding using BPE
+    infill_type: str = None
 
     def __init__(
         self,
         bar_start_token_id: int,
         eos_token_id: int,
-        tokenizer: miditok.MusicTokenizer,
+        tokenizer: miditok.MusicTokenizer
     ) -> None:
         self.bar_start_token_id = bar_start_token_id
         self.eos_token_id = eos_token_id
@@ -57,9 +83,14 @@ class StopLogitsProcessor(LogitsProcessor):
 
         generated_tokens = TokSequence(are_ids_encoded=True)
 
-        fill_start_idx = np.where(
-            input_ids[0].numpy() == self.tokenizer.vocab["FillBar_Start"]
-        )[0][0]
+        if self.infill_type == "bar":
+            fill_start_idx = np.where(
+                input_ids[0].numpy() == self.tokenizer.vocab["FillBar_Start"]
+            )[0][0]
+        elif self.infill_type == "track":
+            fill_start_idx = np.where(
+                input_ids[0].numpy() == self.tokenizer.vocab["Infill_Track"]
+            )[0][0]
 
         n_bar_none = 0
         if fill_start_idx + self.n_attribute_controls + 1 < len(input_ids[0]):
