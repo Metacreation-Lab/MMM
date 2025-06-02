@@ -82,7 +82,8 @@ def generate_batch(
     collator: DataCollator,
     inputs: list[dict[str, InferenceConfig | Score]],
     generate_kwargs: Mapping | None = None,
-    device: str = None
+    device: str = None,
+    remove_first_track: bool = True, #Tokenization on an empty score creates emtpy track, that we must remove
 ) -> tuple[Score, dict]:
     """
     Use the model to generate new music content.
@@ -133,7 +134,7 @@ def generate_batch(
 
             # Run batch generation for this step
             step_results = generate_new_track_batch(
-                model, tokenizer, collator, step_batch, logits_processor, generate_kwargs, device
+                model, tokenizer, collator, step_batch, logits_processor, generate_kwargs, device, (step == 0 & remove_first_track)
             )
 
             # Update scores and metadatas in-place
@@ -263,7 +264,8 @@ def generate_new_track_batch(
     scores_tracks: list[tuple[Score, dict, tuple[int, list[str]]]],
     logits_processor: TrackLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
-    device: str = None
+    device: str = None,
+    remove_first_track: bool = False
 ) -> tuple[Score, dict]:
     """
     Generate a new track of a given Score.
@@ -296,6 +298,15 @@ def generate_new_track_batch(
         # Build input sequence for this track
         input_seq = tokenizer.encode(score, metadata=metadata)
 
+        if remove_first_track:
+            # Empty track includes 6 tokens
+            if len(input_seq.ids) < 7:
+                input_seq.ids = []
+                input_seq.tokens = []
+            else:
+                input_seq.ids = input_seq.ids[6:]
+                input_seq.tokens = input_seq.tokens[6:]
+
         # Append special tokens
         input_seq.ids.append(tokenizer.vocab["Track_Start"])
         input_seq.tokens.append("Track_Start")
@@ -325,6 +336,7 @@ def generate_new_track_batch(
 
     padded_batch = collator(batch)[input_name]
 
+    input_tensor = padded_batch
     if device:
         input_tensor = padded_batch.to(device=device)
 
