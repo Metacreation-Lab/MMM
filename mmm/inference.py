@@ -235,14 +235,15 @@ def generate_new_track(
 
     # Decode BPE ids before getting the associated tokens
     tokenizer.decode_token_ids(output_seq)
-    output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
 
-    #print("after_gen")
-    #logging.debug("After Generation")
-    #for tok in output_seq.tokens:
-    #    logging.debug(tok)
-    #logging.debug(output_seq.tokens)
-    #print(output_seq.tokens)
+    pad_id = tokenizer.vocab["PAD_None"]
+    eos_id = tokenizer.vocab["Track_End"]
+
+    while output_seq.ids and (output_seq.ids[-1] == pad_id or output_seq.ids[-1] == eos_id):
+        output_seq.ids.pop()
+    output_seq.ids.append(eos_id)
+
+    output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
 
     # It is expected to have a <TRACK_END> token at the end of the sequence.
     if output_seq.tokens[-1] != "Track_End":
@@ -355,16 +356,22 @@ def generate_new_track_batch(
     for output_ids, (input_seq, control_len, len_trim) in zip(output_ids_batch, input_seqs):
         output_seq = TokSequence(ids=output_ids.tolist(), are_ids_encoded=True)
 
-        # Remove attribute controls
-        # output_seq = (
-        #     output_seq[:len(input_seq)] + output_seq[len(input_seq) + control_len:]
-        # )
 
         output_seq = (
             input_seq[:-control_len] + output_seq[len(input_seq) - len_trim + control_len:]
         )
 
+        # Decode BPE ids before getting the associated tokens
         tokenizer.decode_token_ids(output_seq)
+
+        pad_id = tokenizer.vocab["PAD_None"]
+        eos_id = tokenizer.vocab["Track_End"]
+
+        while output_seq.ids and (output_seq.ids[-1] == pad_id or output_seq.ids[-1] == eos_id):
+            print("pop")
+            output_seq.ids.pop()
+        output_seq.ids.append(eos_id)
+
         output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
 
         # Ensure <TRACK_END>
