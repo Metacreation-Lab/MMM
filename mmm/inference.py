@@ -368,7 +368,6 @@ def generate_new_track_batch(
         eos_id = tokenizer.vocab["Track_End"]
 
         while output_seq.ids and (output_seq.ids[-1] == pad_id or output_seq.ids[-1] == eos_id):
-            print("pop")
             output_seq.ids.pop()
         output_seq.ids.append(eos_id)
 
