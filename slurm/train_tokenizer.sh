@@ -12,19 +12,45 @@
 #SBATCH --mem=64G
 #SBATCH --time=20:00:00
 
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -m|--model)
+      MODEL="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -*|--*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1") # save positional arg
+      shift # past argument
+      ;;
+  esac
+done
+set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/data && cp -r $SCRATCH/data/GigaMIDI $SLURM_TMPDIR/data/"
+
 # Output ram info
 echo "START TIME: $(date)"
 free -h
 
+module load python/3.11
+module load gcc arrow/17.0.0 rust
+
+source .venv/bin/activate
+
 # Defining the right environment variables
-export PYTHONPATH=$HOME/MMM
+export PYTHONPATH=$PYTHONPATH:$SCRATCH/MMM
 export HF_HOME=$SCRATCH/.hf_cache
 
 # Load the python environment
 # Make sure the required packages are installed
-source .venv/bin/activate
 
 # Run the training
-python scripts/train_tokenizer.py
+python scripts/train_tokenizer.py --model $MODEL
 
 echo "END TIME: $(date)"

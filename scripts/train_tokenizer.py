@@ -29,11 +29,12 @@ class TokTrainingIterator:
     def __init__(
         self,
         tokenizer: MusicTokenizer,
-        dataset: Dataset,
+        dataset: Dataset
     ) -> None:
         self.tokenizer = tokenizer
         self.dataset = dataset
         self.__iter_count = 0
+        self.exclude_bar_token = exclude_bar_token
 
     def tokenize_sample(self, idx: int) -> list[str]:
         """
@@ -44,7 +45,7 @@ class TokTrainingIterator:
         """
         # Load and tokenize file
         try:
-            score = Score.from_midi(self.dataset[idx]["music"]["bytes"])
+            score = Score.from_midi(self.dataset[idx]["music"])
         except SCORE_LOADING_EXCEPTION:
             return []
 
@@ -73,7 +74,14 @@ class TokTrainingIterator:
             new_seqs = []
             for seq in tokseq:
                 if self.tokenizer.config.encode_ids_split == "bar":
-                    new_seqs += seq.split_per_bars()
+                    bar_seqs = seq.split_per_bars()
+                    if self.exclude_bar_token:
+                        for i in range(bar_seqs):
+                            # We assume when split by bars, every sub-sequence begins
+                            # with the Bar_None token, which we wish to exclude
+                            bar_seqs[i] = bar_seqs[i,1:]
+
+                    new_seqs += bar_seqs
                 else:
                     new_seqs += seq.split_per_beats()
             tokseq = [seq for seq in new_seqs if len(seq) > 0]
@@ -131,17 +139,32 @@ if __name__ == "__main__":
     from utils.baselines import mmm_mistral
     from utils.constants import TRAINING_TOKENIZER_MAX_NUM_FILES
 
-    set_seed(mmm_mistral.seed)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="mistral")
+    parser.add_argument("--short", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        model = baselines[args.model]
+    except:
+        msg = f"Model name '{args.model}' not found. Must be one of following:\n   - "
+        msg += "\n   - ".join(list(baselines.keys()))
+        raise ValueError(msg)
+    set_seed(model.seed)
 
     # Train the tokenizer
-    dataset_ = mmm_mistral.create_dataset()["train"]
-    dataset_.shuffle()
-    dataset_ = mmm_mistral.preprocess_dataset(dataset_).select(
-        list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))
-    )
-    iterator = TokTrainingIterator(mmm_mistral.tokenizer, dataset_)
-    mmm_mistral.tokenizer.train(
-        vocab_size=mmm_mistral.tokenization_config.vocab_size,
-        iterator=iterator,
-    )
-    mmm_mistral.tokenizer.save(mmm_mistral.tokenizer_path)
+    if not args.short:
+        # Train the tokenizer
+        dataset_ = model.create_dataset_from_parquet()["train"]
+        dataset_.shuffle()
+        dataset_ = model.preprocess_dataset(dataset_).select(
+            list(range(TRAINING_TOKENIZER_MAX_NUM_FILES))
+        )
+        iterator = TokTrainingIterator(model.tokenizer, dataset_)
+        print(f'Training {model.tokenization_config.vocab_size}')
+        model.tokenizer.train(
+            vocab_size=model.tokenization_config.vocab_size,
+            iterator=iterator,
+        )
+    model.tokenizer.save(model.tokenizer_path)

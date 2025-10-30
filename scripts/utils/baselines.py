@@ -164,7 +164,7 @@ class MMM(Baseline):
             try:
                 return load_dataset(
                     str(self.dataset_path),
-                    "all-instruments-with-drums",
+                    self.versoin,
                     subsets=self.data_config.subsets_names,
                     trust_remote_code=True,
                 )
@@ -183,18 +183,21 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path("../data/GigaMIDI")
+        #dataset_path = Path(os.getenv("SCRATCH"), "data", self.dataset)
+        dataset_path = self.dataset_path
+        version = self.version
 
         try:
             # Load the datasets using load_dataset
             return load_dataset(
                 "parquet",
                 data_files={
-                    "train": dataset_path / "all-instruments-with-drums"
-                    "/train.parquet",
-                    "validation": dataset_path / "all-instruments-with-drums"
-                    "/validation.parquet",
-                    "test": dataset_path / "all-instruments-with-drums/test.parquet",
+                    "train": str(dataset_path /
+                                version / "train.parquet"),
+                    "validation": str(dataset_path /
+                                version / "validation.parquet"),
+                    "test": str(dataset_path /
+                                version / "test.parquet"),
                 },
             )
         except PermissionError:
@@ -288,6 +291,7 @@ training_config_kwargs = {
     "do_eval": True,
     "do_predict": False,
     "eval_strategy": EVAL_STRATEGY,
+    "eval_steps": EVAL_STEPS,
     "per_device_train_batch_size": BATCH_SIZE_PER_DEVICE_TRAIN,
     "per_device_eval_batch_size": BATCH_SIZE_PER_DEVICE_VALID,
     "gradient_accumulation_steps": GRAD_ACC_STEPS,
