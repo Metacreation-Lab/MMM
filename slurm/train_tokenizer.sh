@@ -10,7 +10,7 @@
 #SBATCH --ntasks-per-node=1  # nb of tasks per node
 #SBATCH --cpus-per-task=16    # nb of CPU cores per task
 #SBATCH --mem=64G
-#SBATCH --time=20:00:00
+#SBATCH --time=3-00:00:00
 
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
 
-srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir $SLURM_TMPDIR/data && cp -r $SCRATCH/data/GigaMIDI $SLURM_TMPDIR/data/"
+srun --ntasks=$SLURM_NNODES --ntasks-per-node=1 bash -c "mkdir -p $SLURM_TMPDIR/data && cp -r -v $SCRATCH/data/GigaMIDI $SLURM_TMPDIR/data/"
 
 # Output ram info
 echo "START TIME: $(date)"

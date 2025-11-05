@@ -79,8 +79,8 @@ class Baseline(ABC):
     model_config: PretrainedConfig
     training_config_kwargs: dict[str, Any]
     data_config: DataConfig
-    generation_config: GenerationConfig = Bar_None
-    version: str = "v1.0.0"
+    generation_config: GenerationConfig = None
+    version: str = "v1.1.0"
 
     def __post_init__(self) -> None:
         """Post init method creating the tokenizer and tweaking configs."""
@@ -125,7 +125,7 @@ class Baseline(ABC):
 
         :return: path of the tokenizer's configuration file.
         """
-        return self.run_path.parent / "tokenizer.json"
+        return self.run_path.parent / f"{self.name}_tokenizer.json"
 
     @property
     def dataset_path(self) -> Path:

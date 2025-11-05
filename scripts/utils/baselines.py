@@ -46,6 +46,7 @@ from .constants import (
     ETA_CUTOFF,
     EVAL_ACCUMULATION_STEPS,
     EVAL_STRATEGY,
+    EVAL_STEPS,
     FEEDFORWARD_SIZE,
     FP16,
     FP16_EVAL,
@@ -164,7 +165,7 @@ class MMM(Baseline):
             try:
                 return load_dataset(
                     str(self.dataset_path),
-                    self.versoin,
+                    self.version,
                     subsets=self.data_config.subsets_names,
                     trust_remote_code=True,
                 )
@@ -189,17 +190,32 @@ class MMM(Baseline):
 
         try:
             # Load the datasets using load_dataset
-            return load_dataset(
-                "parquet",
-                data_files={
-                    "train": str(dataset_path /
-                                version / "train.parquet"),
-                    "validation": str(dataset_path /
-                                version / "validation.parquet"),
-                    "test": str(dataset_path /
-                                version / "test.parquet"),
-                },
-            )
+            if version == "v1.0.0":
+                return load_dataset(
+                    "parquet",
+                    data_files={
+                        "train": str(dataset_path /
+                                    version / "train.parquet"),
+                        "validation": str(dataset_path /
+                                    version / "validation.parquet"),
+                        "test": str(dataset_path /
+                                    version / "test.parquet"),
+                    },
+                )
+            elif version == "v1.1.0":
+                return load_dataset(
+                    "parquet",
+                    data_files={
+                        "train": str(dataset_path / 
+                                    version / "train" / "*.parquet"),
+                        "validation": str(dataset_path / 
+                                    version / "validation" / "*.parquet"),
+                        "test": str(dataset_path / 
+                                    version / "test" / "*.parquet"),
+                    },
+                )
+            else:
+                raise RuntimeError(f"Version {self.version} is not supported by GigaMIDI!")
         except PermissionError:
             # Handle potential permission errors
             path = os.getenv("SLURM_TMPDIR")
@@ -247,7 +263,6 @@ class MMM(Baseline):
 
         :param dataset: ``datasets.Dataset`` to process.
         """
-        print(dataset[0])
         return dataset.filter(
             lambda ex: is_score_valid(
                 ex["music"], MIN_NUM_BARS_FILE_VALID, MIN_NUM_NOTES_FILE_VALID

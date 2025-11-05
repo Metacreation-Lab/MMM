@@ -4,15 +4,58 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import TYPE_CHECKING
 
 from miditok import MusicTokenizer, TokSequence
 from miditok.constants import SCORE_LOADING_EXCEPTION
 from symusic import Score
+from tqdm import tqdm
 
 if TYPE_CHECKING:
     from datasets import Dataset
 
+VALID_PREFIXES = ("Pitch_", "Position_", "Velocity_", "Duration_")
+
+def extract_valid_subsequences(seq: TokSequence) -> list[TokSequence]:
+    """
+    Extract continuous subsequences of a TokSequence containing only valid musical tokens.
+    Valid tokens: Pitch_, Position_, Velocity_, Duration_
+    """
+    subsequences = []
+    current_tokens, current_ids, current_events = [], [], []
+
+    # Determine which attribute to iterate by (tokens usually)
+    if len(seq.tokens) == 0:
+        return []
+
+    for tok, tid, evt in zip(seq.tokens, seq.ids, seq.events):
+        if isinstance(tok, list):  # handle multi-track
+            tok = tok[0]
+        if any(tok.startswith(pref) for pref in VALID_PREFIXES):
+            current_tokens.append(tok)
+            current_ids.append(tid)
+            current_events.append(evt)
+        else:
+            # close off the subsequence if we had a run
+            if current_tokens:
+                subsequences.append(TokSequence(
+                    tokens=current_tokens,
+                    ids=current_ids,
+                    events=current_events,
+                ))
+                current_tokens, current_ids, current_events = [], [], []
+
+    # Handle leftover tail
+    if current_tokens:
+        subsequences.append(TokSequence(
+            tokens=current_tokens,
+            ids=current_ids,
+            events=current_events,
+        ))
+
+    return subsequences
 
 class TokTrainingIterator:
     r"""
@@ -34,7 +77,7 @@ class TokTrainingIterator:
         self.tokenizer = tokenizer
         self.dataset = dataset
         self.__iter_count = 0
-        self.exclude_bar_token = exclude_bar_token
+        self.errors = 0
 
     def tokenize_sample(self, idx: int) -> list[str]:
         """
@@ -59,12 +102,17 @@ class TokTrainingIterator:
         # can't use isinstance because of circular import
         if type(self.tokenizer).__name__ == "MMM":
             kwargs["concatenate_track_sequences"] = False
-        tokseq = self.tokenizer(
-            score,
-            encode_ids=False,
-            no_preprocess_score=True,
-            **kwargs,
-        )
+        try:
+            tokseq = self.tokenizer(
+                score,
+                encode_ids=False,
+                no_preprocess_score=True,
+                **kwargs,
+            )
+        except:
+            self.errors += 1
+            print(f"Errors tokenizer {self.errors}")
+            return []
 
         # Split ids if requested
         if self.tokenizer.config.encode_ids_split in ["bar", "beat"]:
@@ -75,15 +123,13 @@ class TokTrainingIterator:
             for seq in tokseq:
                 if self.tokenizer.config.encode_ids_split == "bar":
                     bar_seqs = seq.split_per_bars()
-                    if self.exclude_bar_token:
-                        for i in range(bar_seqs):
-                            # We assume when split by bars, every sub-sequence begins
-                            # with the Bar_None token, which we wish to exclude
-                            bar_seqs[i] = bar_seqs[i,1:]
-
-                    new_seqs += bar_seqs
+                    for bar_seq in bar_seqs:
+                        new_seqs.extend(extract_valid_subsequences(bar_seq))
                 else:
-                    new_seqs += seq.split_per_beats()
+                    beat_seqs = seq.split_per_beats()
+                    for beat_seq in beat_seqs:
+                        new_seqs.extend(extract_valid_subsequences(beat_seq))
+
             tokseq = [seq for seq in new_seqs if len(seq) > 0]
 
         # Convert ids to bytes for training
@@ -136,7 +182,7 @@ class TokTrainingIterator:
 
 if __name__ == "__main__":
     from transformers.trainer_utils import set_seed
-    from utils.baselines import mmm_mistral
+    from utils.baselines import baselines
     from utils.constants import TRAINING_TOKENIZER_MAX_NUM_FILES
 
     import argparse
