@@ -80,7 +80,7 @@ class Baseline(ABC):
     training_config_kwargs: dict[str, Any]
     data_config: DataConfig
     generation_config: GenerationConfig = None
-    version: str = "v1.1.0"
+    version: str = "v0.0.0"
 
     def __post_init__(self) -> None:
         """Post init method creating the tokenizer and tweaking configs."""

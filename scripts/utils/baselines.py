@@ -111,7 +111,8 @@ if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
 
-attn_implem = "flash_attention_2" if "flash_attn" in sys.modules else None
+#attn_implem = "flash_attention_2" if "flash_attn" in sys.modules else None
+attn_implem = None
 dtype = torch.bfloat16 if BF16 else torch.float16 if FP16 else torch.float32
 
 
@@ -188,10 +189,12 @@ class MMM(Baseline):
         dataset_path = self.dataset_path
         version = self.version
 
+        print(dataset_path / version)
+
         try:
             # Load the datasets using load_dataset
             if version == "v1.0.0":
-                return load_dataset(
+                dataset = load_dataset(
                     "parquet",
                     data_files={
                         "train": str(dataset_path /
@@ -202,8 +205,8 @@ class MMM(Baseline):
                                     version / "test.parquet"),
                     },
                 )
-            elif version == "v1.1.0":
-                return load_dataset(
+            elif version == "v1.1.0" or version == "v0.0.0":
+                dataset = load_dataset(
                     "parquet",
                     data_files={
                         "train": str(dataset_path / 
@@ -216,6 +219,15 @@ class MMM(Baseline):
                 )
             else:
                 raise RuntimeError(f"Version {self.version} is not supported by GigaMIDI!")
+            clip_percent = 0.01
+            if clip_percent is not None:
+                if not (0 < clip_percent <= 1):
+                    raise ValueError("clip_percent must be between 0 and 1")
+                for split in dataset:
+                    n = int(len(dataset[split]) * clip_percent)
+                    dataset[split] = dataset[split].select(range(n))
+                    print(f"{split} clipped to {n} samples ({clip_percent*100:.1f}%)")
+            return dataset
         except PermissionError:
             # Handle potential permission errors
             path = os.getenv("SLURM_TMPDIR")

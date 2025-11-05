@@ -12,18 +12,17 @@ if [ ! -d "$VENV" ]; then
 fi
 
 # Load the python environment
-module load gcc arrow/17.0.0 rust  # needed since arrow can't be installed in the venv via pip
+module purge
+module load gcc arrow rust # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
-pip install symusic==0.5.0 
-pip install miditok 
-pip install transformers==4.49.0 accelerate==1.4.0 tensorboard==2.19.0 
-pip install flash_attn==2.5.7 
-pip install deepspeed==0.14.4 
-pip install datasets==3.3.2 
-pip install triton==3.1.0 
-pip install nvitop
-pip install .
-pip freeze
+pip install "huggingface-hub[cli]==0.34.0" \
+            miditok \
+            transformers==4.48.0 accelerate==1.10.0 tensorboard==2.15.0 \
+            deepspeed \
+            datasets==3.6.0 \
+            triton==3.2.0
+
+pip list
 
 echo "END TIME: $(date)"

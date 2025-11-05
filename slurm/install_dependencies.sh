@@ -27,13 +27,13 @@ fi
 module load gcc arrow/17.0.0 rust  # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
-srun bash -c "pip install symusic==0.5.0 -vv"
-srun bash -c "pip install git+https://github.com/Natooz/MidiTok.git -vv"
-srun bash -c "pip install transformers==4.49.0 accelerate==1.4.0 tensorboard==2.19.0 -vv"
-srun bash -c "pip install flash_attn==2.5.7 -vv"
-srun bash -c "pip install deepspeed==0.14.4 -vv"
-srun bash -c "pip install datasets==3.3.2 -vv"
-srun bash -c "pip install triton==3.1.0 -vv"
+srun bash -c "pip install symusic==0.5.0"
+srun bash -c "pip install miditok"
+srun bash -c "pip install transformers==4.49.0 accelerate==1.4.0 tensorboard==2.19.0"
+srun bash -c "pip install flash_attn==2.5.7"
+srun bash -c "pip install deepspeed==0.14.4"
+srun bash -c "pip install datasets==3.3.2"
+srun bash -c "pip install triton==3.1.0"
 srun bash -c "pip install ."
 srun bash -c "pip freeze"
 
