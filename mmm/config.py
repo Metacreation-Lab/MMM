@@ -29,7 +29,6 @@ class InferenceConfig:
 
     def __post_init__(self) -> None:
         """Check that the Inference config is consistent."""
-        self.context_tracks = self.bars_to_generate.keys()
 
         if len(self.bars_to_generate) > 0:
             self.infilling = True
