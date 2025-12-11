@@ -40,6 +40,7 @@ class TrackLogitsProcessor(LogitsProcessor):
           - Stop generating new bars after bars_to_generate reached
           - Force EOS after track_end_token
         """
+
         start_time = time.time()
 
         # Disable track start token always
@@ -53,8 +54,9 @@ class TrackLogitsProcessor(LogitsProcessor):
             self.current_num_bars += 1
 
         # If reached bar limit → disallow further bar start tokens
-        if self.current_num_bars >= self.bars_to_generate:
-            scores[0, self.bar_start_token_id] = -1e9
+        if self.current_num_bars == self.bars_to_generate + 1:
+            scores[0,:] = -1e9
+            scores[0, self.track_end_token_id] = 1e9
         else:
             scores[0, self.track_end_token_id] = -1e9
 
@@ -118,8 +120,9 @@ class InfillLogitsProcessor(LogitsProcessor):
             self.current_num_bars += 1
 
         # When bar limit reached → mask further bar starts
-        if self.current_num_bars >= self.num_bars_to_generate:
-            scores[0, self.bar_start_token_id] = -1e9
+        if self.current_num_bars == self.num_bars_to_generate + 1:
+            scores[0, :] = -1e9
+            scores[0, self.fillbar_end_token_id] = 1e9
         else:
             scores[0, self.fillbar_end_token_id] = -1e9
 

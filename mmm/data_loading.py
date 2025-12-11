@@ -212,6 +212,12 @@ class DatasetMMM(DatasetMIDI):
             if self.seq2seq:
                 item[self.decoder_key_name] = None
             return item
+        except Exception as e:
+            print(f"Unexpected exception in dataloader (item {idx} ): {e}")
+            item = {self.sample_key_name: None, self.labels_key_name: None}
+            if self.seq2seq:
+                item[self.decoder_key_name] = None
+            return item
         if tseq is None:
             item = {self.sample_key_name: None, self.labels_key_name: None}
             if self.seq2seq:
