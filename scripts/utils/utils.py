@@ -19,8 +19,8 @@ def path_data_directory_local_fs() -> Path:
 
     :return: path to the root data directory.
     """
-    return Path(os.getenv("SLURM_TMPDIR", os.getenv("SCRATCH")), "data")
-    #return Path(os.getenv("SCRATCH"), "data")
+    #return Path(os.getenv("SLURM_TMPDIR", os.getenv("SCRATCH")), "data")
+    return Path(os.getenv("SCRATCH"), "data")
 
 def symusic_track_to_struct(track: Track) -> dict[str, np.ndarray]:
     """

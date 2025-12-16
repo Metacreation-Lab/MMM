@@ -133,4 +133,3 @@ class InfillLogitsProcessor(LogitsProcessor):
 
         self.total_time += time.time() - start_time
         return scores
-

@@ -13,7 +13,11 @@ from symusic import Score
 from torch import LongTensor
 from transformers import LogitsProcessorList
 
-from .logits_processor import TrackLogitsProcessor, InfillLogitsProcessor
+from .logits_processor import (
+    TrackLogitsProcessor, 
+    InfillLogitsProcessor
+)
+from .utils import InferenceTimer, PerfCounterTimer, ProcessTimeTimer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,7 +32,7 @@ def generate(
     inference_config: InferenceConfig,
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
-) -> Score:
+) -> Mapping:
     """
     Use the model to generate new music content.
 
@@ -43,6 +47,14 @@ def generate(
         ``GenerationConfig`` using this argument.
     :return: the infilled ``symusic.Score`` object.
     """
+
+    timer = InferenceTimer([
+        PerfCounterTimer(),
+        ProcessTimeTimer()
+    ])
+
+    timer.start_preprocessing()
+
     score = (
         Score(score_or_path) if not isinstance(score_or_path, Score) else score_or_path
     )
@@ -51,16 +63,35 @@ def generate(
     if inference_config.infilling:
         for track, bars in inference_config.bars_to_generate.items():
             score = generate_infilling(
-                model, tokenizer, track, bars, score, generate_kwargs, num_context = inference_config.context_length            )
+                model, 
+                tokenizer, 
+                track, 
+                bars, 
+                score, 
+                generate_kwargs, 
+                num_context = inference_config.context_length,
+                timer = timer           
+            )
 
     # Generate new tracks
     if inference_config.autoregressive:
         for track in inference_config.new_tracks:
             score = generate_new_track(
-                model, tokenizer, track, score, generate_kwargs, num_context = inference_config.context_length
+                model, 
+                tokenizer, 
+                track, 
+                score, 
+                generate_kwargs, 
+                num_context = inference_config.context_length,
+                timer = timer
             )
 
-    return score
+    timer.end_postprocessing()
+
+    return {
+        "score": score,
+        "time_metrics": timer.report()
+    }
 
 
 def generate_new_track(
@@ -70,7 +101,8 @@ def generate_new_track(
     score: Score,
     generate_kwargs: Mapping | None = None,
     num_context: int = 8,
-    max_len: int = 2048
+    max_len: int = 2048,
+    timer: InferenceTimer | None = None
 ) -> Score:
     """
     Generate a new track for a Score, using only the last `num_context` bars of
@@ -147,12 +179,24 @@ def generate_new_track(
     logit_processor_list = LogitsProcessorList()
     logit_processor_list.append(logits_processor)
 
+    if timer:
+        timer.end_preprocessing()
+        timer.start_inference()
+
     output_ids = model.generate(
         LongTensor([input_seq.ids]), 
         logits_processor=logit_processor_list,
         **generate_kwargs
-    )
-    output_seq = TokSequence(ids=output_ids[0].tolist(), are_ids_encoded=True)
+    )[0].tolist()
+
+    if timer:
+        timer.end_inference()
+        timer.start_postprocessing()
+
+    if timer:
+        timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
+
+    output_seq = TokSequence(ids=output_ids, are_ids_encoded=True)
 
     # --- Clean up (remove controls)
     output_start = len(input_seq) - num_attr - 2
@@ -199,7 +243,8 @@ def generate_infilling(
     score: Score,
     generate_kwargs: Mapping | None = None,
     num_context: int = 8,
-    max_len: int = 2048
+    max_len: int = 2048,
+    timer: InferenceTimer | None = None
 ) -> Score:
     """
     Generate a new portion of a ``symusic.Score``.
@@ -232,36 +277,42 @@ def generate_infilling(
 
         tokens = tokenizer.encode(score, concatenate_track_sequences=False)
 
-        conditioning_dict = {}
-
         toksequence_to_infill = TokSequence(are_ids_encoded=False)
+
+        times = np.array([event.time for event in tokens[track_idx].events])
 
         bars_ticks = tokens[track_idx]._ticks_bars
         num_bars = len(bars_ticks)
         
+        assert start_bar_idx >= 0, f"Invalid infilling start bar index : {start_bar_idx}"
+        assert end_bar_idx <= num_bars, f"Invalid infilling end bar index : {end_bar_idx} (must be leq than {num_bars})"
+        
         bar_tick_start = bars_ticks[start_bar_idx]
-        bar_tick_end = bars_ticks[end_bar_idx]
-
-        times = np.array([event.time for event in tokens[track_idx].events])
 
         token_idx_start = np.nonzero(times >= bar_tick_start)[0]
         token_idx_start = token_idx_start[0]
 
-        token_idx_end = np.nonzero(times >= bar_tick_end)[0]
-        token_idx_end = token_idx_end[0]
-
         context_start_bar = max(start_bar_idx - num_context,0)
-        context_end_bar = min(end_bar_idx + num_context, num_bars-1)
 
         # Context
         context_token_start_idx = np.nonzero(
             times >= bars_ticks[context_start_bar]
         )[0][0]
-        context_token_end_idx = np.nonzero(
-            times >= bars_ticks[context_end_bar]
-        )[0][0]
 
-        conditioning_dict[track_idx] = (context_token_start_idx, context_token_end_idx)
+        if end_bar_idx < num_bars:
+            bar_tick_end = bars_ticks[end_bar_idx]
+
+            token_idx_end = np.nonzero(times >= bar_tick_end)[0]
+            token_idx_end = token_idx_end[0]
+
+            context_end_bar = min(end_bar_idx + num_context, num_bars-1)
+
+            context_token_end_idx = np.nonzero(
+                times >= bars_ticks[context_end_bar]
+            )[0][0]
+        else:
+            context_token_end_idx = len(tokens[track_idx].tokens) - 1
+            token_idx_end = context_token_end_idx
 
         # Decode BPE tokens: this is necessary to put <INFILL_BAR> tokens
         # at the right place
@@ -291,10 +342,12 @@ def generate_infilling(
             context_token_start_idx = np.nonzero(
                 times >= bars_ticks[context_start_bar]
             )[0][0]
-            context_token_end_idx = np.nonzero(
-                times >= bars_ticks[context_end_bar]
-            )[0][0]
-            conditioning_dict[i] = (context_token_start_idx, context_token_end_idx)
+            if end_bar_idx < num_bars:
+                context_token_end_idx = np.nonzero(
+                    times >= bars_ticks[context_end_bar]
+                )[0][0]
+            else:
+                context_token_end_idx = len(tokens[i]) - 1
             input_seq += (
                 tokens[i][:2]
                 + tokens[i][context_token_start_idx:context_token_end_idx]
@@ -324,11 +377,21 @@ def generate_infilling(
         logit_processor_list = LogitsProcessorList()
         logit_processor_list.append(logits_processor)
 
+        if timer:
+            timer.end_preprocessing()
+            timer.start_inference()
+
         output_ids = model.generate(
             LongTensor([input_seq.ids]),
             logits_processor=logit_processor_list,
             **generate_kwargs,
         )[0].numpy()
+
+        if timer:
+            timer.end_inference()
+            timer.start_postprocessing()
+
+            timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
 
         if output_ids[-1] == tokenizer.vocab["EOS_None"]:
             output_ids = output_ids[:-1] 

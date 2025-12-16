@@ -4,7 +4,28 @@ from torch.backends.mps import is_available as mps_available
 from torch.cuda import is_available as cuda_available
 from torch.cuda import is_bf16_supported
 
-SEED = 433
+import json
+from pathlib import Path
+import random
+
+DEFAULT_SEED = 134534543
+
+THIS_DIR = Path(__file__).resolve().parent
+
+# JSON file next to this constants.py
+SEED_FILE = THIS_DIR / "seed.json"
+
+def _load_seed() -> int:
+    if not SEED_FILE.exists():
+        return DEFAULT_SEED
+    try:
+        data = json.loads(SEED_FILE.read_text())
+        return int(data.get("seed", DEFAULT_SEED))
+    except Exception:
+        return DEFAULT_SEED
+
+SEED = _load_seed()
+#SEED = new_seed = random.randint(1, 1_000_000_000)
 MODEL_NAME = "MMM"
 HF_USERNAME = "Metacreation"
 
@@ -58,6 +79,7 @@ TOKENIZER_PARAMS = {
 
 # TOKENIZER TRAINING PARAMS
 VOCAB_SIZE = 16000
+VOCAB_SIZE_SMALL = 665
 ACS_RANDOM_RATIO_RANGE = (0.05, 0.9)
 TRACKS_IDX_RANDOM_RATIO_RANGE = (0.1, 1)
 BARS_IDX_RANDOM_RATIO_RANGE = (0.1, 0.7)
@@ -83,15 +105,16 @@ RATIOS_RANGE_BAR_INFILLING_DURATION = (0.1, 0.4)
 
 # TRAINING PARAMS
 DROPOUT = 0.1
-BATCH_SIZE_PER_DEVICE_TRAIN = 64  # multiple of 64 for A100, 8 for other GPUs (V100)
-BATCH_SIZE_PER_DEVICE_VALID = 128
-DATALOADER_NUM_WORKERS = 8
+BATCH_SIZE_PER_DEVICE_TRAIN = 32  # multiple of 64 for A100, 8 for other GPUs (V100)
+BATCH_SIZE_PER_DEVICE_VALID = 32
+DATALOADER_NUM_WORKERS = (2 - (SEED % 2)) * 4
 DATALOADER_PERSISTENT_WORKERS = False
-VALID_DELAY = 500
+DATALOADER_PIN_MEMORY = True
+VALID_DELAY = 5000
 GRAD_ACC_STEPS = 1
 EVAL_STRATEGY = "steps"
-EVAL_STEPS = 250
-EVAL_ACCUMULATION_STEPS = None  # in case of CUDA OOM during eval
+EVAL_STEPS = 2500
+EVAL_ACCUMULATION_STEPS = 2  # in case of CUDA OOM during eval
 WEIGHT_DECAY = 0.01
 GRADIENT_CLIP_NORM = 3.0
 LABEL_SMOOTHING = 0.0
@@ -116,7 +139,7 @@ DDP_BUCKET_CAP_MB = None  # default to 25mb
 FULL_DETERMINISM = True
 LOG_LEVEL = "debug"
 LOGGING_STRATEGY = "steps"
-LOG_STEPS_INTVL = 50
+LOG_STEPS_INTVL = 100
 SAVE_STRATEGY = "steps"
 SAVE_STEPS = 500
 SAVE_TOTAL_LIMIT = 10

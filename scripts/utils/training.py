@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 import torch.cuda as cuda
-from torch import Tensor, argmax, device
+from torch import Tensor, argmax, device, load
 from torch.backends.mps import is_available as mps_available
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, Trainer
 from transformers.trainer_utils import get_last_checkpoint, set_seed
@@ -148,6 +148,7 @@ def whole_training_process(
         baseline.training_config_kwargs["resume_from_checkpoint"] = get_last_checkpoint(
             str(baseline.run_path)
         )
+
     training_config = Seq2SeqTrainingArguments(**baseline.training_config_kwargs)
     trainer = Seq2SeqTrainer(
         model=model,
@@ -159,6 +160,10 @@ def whole_training_process(
         preprocess_logits_for_metrics=preprocess_logits,
     )
     if not is_training_done(baseline.run_path):
+        print("Training arguments:")
+        print(" Seed", trainer.args.seed)
+        print(" Workers", trainer.args.dataloader_num_workers)
+
         train_model(trainer)
     elif do_test and not is_testing_done(baseline.run_path):
         model = model.from_pretrained(baseline.run_path, device_map="auto")
