@@ -32,6 +32,7 @@ def generate(
     inference_config: InferenceConfig,
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
+    seq2seq: bool = False
 ) -> Mapping:
     """
     Use the model to generate new music content.
@@ -70,7 +71,8 @@ def generate(
                 score, 
                 generate_kwargs, 
                 num_context = inference_config.context_length,
-                timer = timer           
+                timer = timer,
+                seq2seq = seq2seq         
             )
 
     # Generate new tracks
@@ -83,7 +85,8 @@ def generate(
                 score, 
                 generate_kwargs, 
                 num_context = inference_config.context_length,
-                timer = timer
+                timer = timer,
+                seq2seq = seq2seq
             )
 
     timer.end_postprocessing()
@@ -102,7 +105,8 @@ def generate_new_track(
     generate_kwargs: Mapping | None = None,
     num_context: int = 8,
     max_len: int = 2048,
-    timer: InferenceTimer | None = None
+    timer: InferenceTimer | None = None,
+    seq2seq: bool = False
 ) -> Score:
     """
     Generate a new track for a Score, using only the last `num_context` bars of
@@ -150,22 +154,29 @@ def generate_new_track(
     # --- Concatenate reduced tracks to form model input
     input_seq = sum(truncated_tracks, start=TokSequence())
 
+    new_seq = TokSequence()
+
     # --- Add new track header
-    input_seq.ids.append(tokenizer.vocab["Track_Start"])
-    input_seq.tokens.append("Track_Start")
-    input_seq.ids.append(tokenizer.vocab[f"Program_{track[0]}"])
-    input_seq.tokens.append(f"Program_{track[0]}")
+    input_seq.ids.append(tokenizer.vocab["Infill_Track"])
+    input_seq.tokens.append("Infill_Track")
+    new_seq.ids.append(tokenizer.vocab["Track_Start"])
+    new_seq.tokens.append("Track_Start")
+    new_seq.ids.append(tokenizer.vocab[f"Program_{track[0]}"])
+    new_seq.tokens.append(f"Program_{track[0]}")
 
     # --- Attribute controls
     num_attr = len(track[1])
     for control in track[1]:
-        input_seq.ids.append(tokenizer.vocab[control])
-        input_seq.tokens.append(control)
+        new_seq.ids.append(tokenizer.vocab[control])
+        new_seq.tokens.append(control)
 
     # --- Truncate if too long for model
-    if len(input_seq.ids) > max_len:
+    if len(input_seq.ids) + len(new_seq.ids) > max_len:
         input_seq.ids = input_seq.ids[-max_len:]
         input_seq.tokens = input_seq.tokens[-max_len:]
+
+    if not seq2seq:
+        input_seq += new_seq
 
     # --- Generate
 
@@ -183,23 +194,40 @@ def generate_new_track(
         timer.end_preprocessing()
         timer.start_inference()
 
-    output_ids = model.generate(
-        LongTensor([input_seq.ids]), 
-        logits_processor=logit_processor_list,
-        **generate_kwargs
-    )[0].tolist()
+    if seq2seq:
+
+        output_ids = model.generate(
+            LongTensor([input_seq.ids]), 
+            decoder_input_ids=new_seq.ids,
+            logits_processor=logit_processor_list,
+            **generate_kwargs
+        )[0].tolist()
+
+    else:
+
+        output_ids = model.generate(
+            LongTensor([input_seq.ids]), 
+            logits_processor=logit_processor_list,
+            **generate_kwargs
+        )[0].tolist()
 
     if timer:
         timer.end_inference()
         timer.start_postprocessing()
 
     if timer:
-        timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
+        if seq2seq:
+            timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(new_seq.ids))
+        else:
+            timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
 
     output_seq = TokSequence(ids=output_ids, are_ids_encoded=True)
 
     # --- Clean up (remove controls)
-    output_start = len(input_seq) - num_attr - 2
+    if not seq2seq:
+        output_start = len(input_seq) - num_attr - 3
+    else:
+        output_start = 0
     output_seq = output_seq[output_start:]
     first_generated_bar = np.where(np.array(output_seq.ids) == tokenizer.vocab["Bar_None"])[0][0]
     output_seq = output_seq[:2] + output_seq[first_generated_bar:]
@@ -244,7 +272,8 @@ def generate_infilling(
     generate_kwargs: Mapping | None = None,
     num_context: int = 8,
     max_len: int = 2048,
-    timer: InferenceTimer | None = None
+    timer: InferenceTimer | None = None,
+    seq2seq: bool = False
 ) -> Score:
     """
     Generate a new portion of a ``symusic.Score``.
@@ -354,16 +383,24 @@ def generate_infilling(
                 + tokens[i][-1:]
             )
 
-        input_seq.ids.append(tokenizer.vocab["FillBar_Start"])
-        input_seq.tokens.append("FillBar_Start")
+        new_seq = TokSequence()
+
+        new_seq.ids.append(tokenizer.vocab["FillBar_Start"])
+        new_seq.tokens.append("FillBar_Start")
+
+        new_seq.ids.append(tokenizer.vocab["Bar_None"])
+        new_seq.tokens.append("Bar_None")
 
         for control in attribute_controls:
-            input_seq.ids.append(tokenizer.vocab[control])
-            input_seq.tokens.append(control)
+            new_seq.ids.append(tokenizer.vocab[control])
+            new_seq.tokens.append(control)
 
-        if len(input_seq.ids) > max_len:
+        if len(input_seq.ids) + len(new_seq.ids) > max_len:
             input_seq.ids = input_seq.ids[-max_len:]
             input_seq.tokens = input_seq.tokens[-max_len:]
+
+        if not seq2seq:
+            input_seq += new_seq
 
         num_bars_to_generate = end_bar_idx - start_bar_idx
 
@@ -381,17 +418,31 @@ def generate_infilling(
             timer.end_preprocessing()
             timer.start_inference()
 
-        output_ids = model.generate(
-            LongTensor([input_seq.ids]),
-            logits_processor=logit_processor_list,
-            **generate_kwargs,
-        )[0].numpy()
+        if seq2seq:
+
+            output_ids = model.generate(
+                LongTensor([input_seq.ids]),
+                decoder_input_ids=new_seq.ids,
+                logits_processor=logit_processor_list,
+                **generate_kwargs,
+            )[0].numpy()
+
+        else:
+
+            output_ids = model.generate(
+                LongTensor([input_seq.ids]),
+                logits_processor=logit_processor_list,
+                **generate_kwargs,
+            )[0].numpy()
 
         if timer:
             timer.end_inference()
             timer.start_postprocessing()
 
-            timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
+            if seq2seq:
+                timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(new_seq.ids))
+            else:
+                timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
 
         if output_ids[-1] == tokenizer.vocab["EOS_None"]:
             output_ids = output_ids[:-1] 
