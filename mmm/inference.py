@@ -6,6 +6,11 @@ import time
 import warnings
 from typing import TYPE_CHECKING
 from dataclasses import replace
+import os
+
+DEBUG = int(os.environ.get("MMM_DEBUG", 0)) == 1
+if DEBUG:
+    print("MMM debug active")
 
 import numpy as np
 from miditok import MMM, TokSequence
@@ -25,6 +30,68 @@ if TYPE_CHECKING:
 
     from .config import InferenceConfig
 
+def pretty_print_tokens(tokens):
+    indent_track = "  "
+    indent_bar = "    "
+    indent_evt = "      "
+
+    track_idx = -1
+    bar_idx = -1
+
+    def print_bar_header(label):
+        print(f"{indent_bar}{label}")
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+
+        # -------- Track handling --------
+        if tok == "Track_Start":
+            track_idx += 1
+            bar_idx = -1
+            infill_bar_count = 0
+            print(f"\nTrack {track_idx}:")
+            i += 1
+            continue
+
+        if tok == "Track_End":
+            print(f"{indent_track}<End Track>")
+            i += 1
+            continue
+
+        # -------- Bar handling --------
+        if tok == "Bar_None":
+            bar_idx += 1
+            print_bar_header(f"Bar {bar_idx}:")
+            i += 1
+            continue
+
+        if tok == "Infill_Bar":
+            bar_idx += 1
+            print_bar_header(f"Infill_Bar {infill_bar_count}:")
+            i += 1
+            continue
+
+        # -------- FillBar handling --------
+        if tok == "FillBar_Start":
+            print(f"\n<Start Infill>")
+            i += 1
+            continue
+
+        if tok == "FillBar_End":
+            print(f"{indent_track}<End Infill>")
+            i += 1
+            continue
+
+        # -------- EOS --------
+        if tok == "EOS_None":
+            print("\n<EOS>")
+            i += 1
+            continue
+
+        print(f"{indent_evt}{tok}")
+
+        i += 1
 
 def generate(
     model: object,
@@ -312,6 +379,8 @@ def generate_infilling(
 
         bars_ticks = tokens[track_idx]._ticks_bars
         num_bars = len(bars_ticks)
+        if DEBUG:
+            print(f"Num bars: {num_bars}")
         
         assert start_bar_idx >= 0, f"Invalid infilling start bar index : {start_bar_idx}"
         assert end_bar_idx <= num_bars, f"Invalid infilling end bar index : {end_bar_idx} (must be leq than {num_bars})"
@@ -328,27 +397,40 @@ def generate_infilling(
             times >= bars_ticks[context_start_bar]
         )[0][0]
 
+        # If the first bar is in the context, we remove track_start + program
+        # These will be added seperately
+        if context_start_bar == 0:
+            context_token_start_idx += 2
+
         if end_bar_idx < num_bars:
             bar_tick_end = bars_ticks[end_bar_idx]
 
-            token_idx_end = np.nonzero(times >= bar_tick_end)[0]
-            token_idx_end = token_idx_end[0]
+            token_idx_end = np.nonzero(times >= bar_tick_end)[0][0]
 
-            context_end_bar = min(end_bar_idx + num_context, num_bars-1)
+            context_end_bar = min(end_bar_idx + num_context, num_bars)
 
-            context_token_end_idx = np.nonzero(
-                times >= bars_ticks[context_end_bar]
-            )[0][0]
+            if context_end_bar < num_bars:
+                context_token_end_idx = np.nonzero(
+                    times >= bars_ticks[context_end_bar]
+                )[0][0]
+            else:
+                context_token_end_idx = len(tokens[track_idx]) - 1
         else:
-            context_token_end_idx = len(tokens[track_idx].tokens) - 1
+            context_end_bar = end_bar_idx
+            context_token_end_idx = len(tokens[track_idx].tokens)
             token_idx_end = context_token_end_idx
+
+        if DEBUG:
+            print(f"Context: bar [{context_start_bar},{context_end_bar}(")
 
         # Decode BPE tokens: this is necessary to put <INFILL_BAR> tokens
         # at the right place
         tokenizer.decode_token_ids(tokens[track_idx])
 
+        track_start_tokens = tokens[track_idx][:2]
+
         seq_before = (
-            tokens[track_idx][:2]
+            track_start_tokens
             + tokens[track_idx][context_token_start_idx:token_idx_start]
         )
         for _ in range(end_bar_idx - start_bar_idx):
@@ -371,17 +453,20 @@ def generate_infilling(
             context_token_start_idx = np.nonzero(
                 times >= bars_ticks[context_start_bar]
             )[0][0]
-            if end_bar_idx < num_bars:
+            if context_start_bar == 0:
+                context_token_start_idx += 2
+            if context_end_bar < num_bars:
                 context_token_end_idx = np.nonzero(
                     times >= bars_ticks[context_end_bar]
                 )[0][0]
             else:
                 context_token_end_idx = len(tokens[i]) - 1
-            input_seq += (
+            track_seq = (
                 tokens[i][:2]
                 + tokens[i][context_token_start_idx:context_token_end_idx]
                 + tokens[i][-1:]
             )
+            input_seq += track_seq
 
         new_seq = TokSequence()
 
@@ -443,6 +528,9 @@ def generate_infilling(
                 timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(new_seq.ids))
             else:
                 timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
+
+        if DEBUG:
+            pretty_print_tokens(tokenizer._ids_to_tokens(output_ids))
 
         if output_ids[-1] == tokenizer.vocab["EOS_None"]:
             output_ids = output_ids[:-1] 
