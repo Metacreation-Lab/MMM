@@ -49,7 +49,6 @@ def pretty_print_tokens(tokens):
         if tok == "Track_Start":
             track_idx += 1
             bar_idx = -1
-            infill_bar_count = 0
             print(f"\nTrack {track_idx}:")
             i += 1
             continue
@@ -68,7 +67,7 @@ def pretty_print_tokens(tokens):
 
         if tok == "Infill_Bar":
             bar_idx += 1
-            print_bar_header(f"Infill_Bar {infill_bar_count}:")
+            print_bar_header(f"Infill_Bar {bar_idx}:")
             i += 1
             continue
 
@@ -89,7 +88,7 @@ def pretty_print_tokens(tokens):
             i += 1
             continue
 
-        print(f"{indent_evt}{tok}")
+        #print(f"{indent_evt}{tok}")
 
         i += 1
 
@@ -480,12 +479,14 @@ def generate_infilling(
             new_seq.ids.append(tokenizer.vocab[control])
             new_seq.tokens.append(control)
 
-        if len(input_seq.ids) + len(new_seq.ids) > max_len:
-            input_seq.ids = input_seq.ids[-max_len:]
-            input_seq.tokens = input_seq.tokens[-max_len:]
-
         if not seq2seq:
             input_seq += new_seq
+
+        if len(input_seq.ids)> max_len:
+            if DEBUG:
+                print(f"Clipping input sequence by {len(input_seq.ids) - max_len} tokens.")
+            input_seq.ids = input_seq.ids[-max_len:]
+            input_seq.tokens = input_seq.tokens[-max_len:]
 
         num_bars_to_generate = end_bar_idx - start_bar_idx
 
