@@ -5,6 +5,12 @@ from __future__ import annotations
 import time
 import warnings
 from typing import TYPE_CHECKING
+from dataclasses import replace
+import os
+
+DEBUG = int(os.environ.get("MMM_DEBUG", 0)) == 1
+if DEBUG:
+    print("MMM debug active")
 
 import numpy as np
 from miditok import MMM, TokSequence
@@ -12,7 +18,11 @@ from symusic import Score
 from torch import LongTensor
 from transformers import LogitsProcessorList
 
-from .logits_processor import StopLogitsProcessor
+from .logits_processor import (
+    TrackLogitsProcessor, 
+    InfillLogitsProcessor
+)
+from .utils import InferenceTimer, PerfCounterTimer, ProcessTimeTimer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -20,6 +30,67 @@ if TYPE_CHECKING:
 
     from .config import InferenceConfig
 
+def pretty_print_tokens(tokens):
+    indent_track = "  "
+    indent_bar = "    "
+    indent_evt = "      "
+
+    track_idx = -1
+    bar_idx = -1
+
+    def print_bar_header(label):
+        print(f"{indent_bar}{label}")
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+
+        # -------- Track handling --------
+        if tok == "Track_Start":
+            track_idx += 1
+            bar_idx = -1
+            print(f"\nTrack {track_idx}:")
+            i += 1
+            continue
+
+        if tok == "Track_End":
+            print(f"{indent_track}<End Track>")
+            i += 1
+            continue
+
+        # -------- Bar handling --------
+        if tok == "Bar_None":
+            bar_idx += 1
+            print_bar_header(f"Bar {bar_idx}:")
+            i += 1
+            continue
+
+        if tok == "Infill_Bar":
+            bar_idx += 1
+            print_bar_header(f"Infill_Bar {bar_idx}:")
+            i += 1
+            continue
+
+        # -------- FillBar handling --------
+        if tok == "FillBar_Start":
+            print(f"\n<Start Infill>")
+            i += 1
+            continue
+
+        if tok == "FillBar_End":
+            print(f"{indent_track}<End Infill>")
+            i += 1
+            continue
+
+        # -------- EOS --------
+        if tok == "EOS_None":
+            print("\n<EOS>")
+            i += 1
+            continue
+
+        #print(f"{indent_evt}{tok}")
+
+        i += 1
 
 def generate(
     model: object,
@@ -27,7 +98,8 @@ def generate(
     inference_config: InferenceConfig,
     score_or_path: Score | Path | str,
     generate_kwargs: Mapping | None = None,
-) -> Score:
+    seq2seq: bool = False
+) -> Mapping:
     """
     Use the model to generate new music content.
 
@@ -42,26 +114,53 @@ def generate(
         ``GenerationConfig`` using this argument.
     :return: the infilled ``symusic.Score`` object.
     """
+
+    timer = InferenceTimer([
+        PerfCounterTimer(),
+        ProcessTimeTimer()
+    ])
+
+    timer.start_preprocessing()
+
     score = (
         Score(score_or_path) if not isinstance(score_or_path, Score) else score_or_path
     )
 
-    logits_processor = StopLogitsProcessor(
-        tokenizer.vocab["Bar_None"], tokenizer.vocab["FillBar_End"], tokenizer
-    )
-
     # Infill bars
     if inference_config.infilling:
-        score = generate_infilling(
-            model, tokenizer, inference_config, score, logits_processor, generate_kwargs
-        )
+        for track, bars in inference_config.bars_to_generate.items():
+            score = generate_infilling(
+                model, 
+                tokenizer, 
+                track, 
+                bars, 
+                score, 
+                generate_kwargs, 
+                num_context = inference_config.context_length,
+                timer = timer,
+                seq2seq = seq2seq         
+            )
 
     # Generate new tracks
     if inference_config.autoregressive:
         for track in inference_config.new_tracks:
-            score = generate_new_track(model, tokenizer, track, score, generate_kwargs)
+            score = generate_new_track(
+                model, 
+                tokenizer, 
+                track, 
+                score, 
+                generate_kwargs, 
+                num_context = inference_config.context_length,
+                timer = timer,
+                seq2seq = seq2seq
+            )
 
-    return score
+    timer.end_postprocessing()
+
+    return {
+        "score": score,
+        "time_metrics": timer.report()
+    }
 
 
 def generate_new_track(
@@ -70,70 +169,177 @@ def generate_new_track(
     track: tuple[int, list[str]],
     score: Score,
     generate_kwargs: Mapping | None = None,
+    num_context: int = 8,
+    max_len: int = 2048,
+    timer: InferenceTimer | None = None,
+    seq2seq: bool = False
 ) -> Score:
     """
-    Generate a new track of a given Score.
-
-    The new track will be added to the score.
+    Generate a new track for a Score, using only the last `num_context` bars of
+    existing tracks as context, but keeping the full, unclipped score in the result.
 
     :param model: model used for generation
     :param tokenizer: MMM tokenizer
-    :param track: tuple containing the program of the track and a list of Track
-        Attribute Controls.
+    :param track: (program, [attribute controls])
     :param score: symusic.Score
-    :param generate_kwargs: keyword arguments to provide to the ``model.generate``
-        method. For Hugging Face models for example, you can provide a
-        ``GenerationConfig`` using this argument.
-    :return: the infilled ``symusic.Score`` object.
+    :param generate_kwargs: args for model.generate
+    :param num_context: number of bars to keep from each track as context
+    :param max_len: maximum model input length (attention window)
+    :return: new symusic.Score with generated track appended
     """
+    import warnings
+    import numpy as np
+    from torch import LongTensor
+
     if not generate_kwargs:
         generate_kwargs = {}
+    else:
+        generate_kwargs["generation_config"].eos_token_id = tokenizer.vocab[
+            "EOS_None"
+        ]
 
-    # In this case, the prompt is a toksequence containing all the tracks
-    input_seq = tokenizer.encode(score)
+    # --- Encode all tracks (preserve original copy)
+    all_tracks_seq = tokenizer.encode(score, concatenate_track_sequences=False)
+    full_tracks_seq = [replace(seq) for seq in all_tracks_seq]
 
-    # Add <TRACK_START> and <PROGRAM> tokens
-    input_seq.ids.append(tokenizer.vocab["Track_Start"])
-    input_seq.tokens.append("Track_Start")
-    input_seq.ids.append(tokenizer.vocab[f"Program_{track[0]}"])
-    input_seq.tokens.append(f"Program_{track[0]}")
+    # --- Create truncated context copy (bar-aware)
+    truncated_tracks = []
+    bar_token_id = tokenizer.vocab["Bar_None"]
+    max_length = 0
+    for seq in all_tracks_seq:
+        bar_idxs = np.where(np.array(seq.ids) == bar_token_id)[0]
+        if len(bar_idxs) > max_length:
+            max_length = len(bar_idxs)
+        if len(bar_idxs) > num_context:
+            keep_start = bar_idxs[-num_context]
+            seq.ids = seq.ids[keep_start:]
+            seq.tokens = seq.tokens[keep_start:]
+        truncated_tracks.append(seq)
+    num_bars_to_generate = min(max_length, num_context)
 
-    # Add attribute control tokens
+    # --- Concatenate reduced tracks to form model input
+    input_seq = sum(truncated_tracks, start=TokSequence())
+
+    new_seq = TokSequence()
+
+    # --- Add new track header
+    input_seq.ids.append(tokenizer.vocab["Infill_Track"])
+    input_seq.tokens.append("Infill_Track")
+    new_seq.ids.append(tokenizer.vocab["Track_Start"])
+    new_seq.tokens.append("Track_Start")
+    new_seq.ids.append(tokenizer.vocab[f"Program_{track[0]}"])
+    new_seq.tokens.append(f"Program_{track[0]}")
+
+    # --- Attribute controls
+    num_attr = len(track[1])
     for control in track[1]:
-        input_seq.ids.append(tokenizer.vocab[control])
-        input_seq.tokens.append(control)
+        new_seq.ids.append(tokenizer.vocab[control])
+        new_seq.tokens.append(control)
 
-    output_ids = model.generate(LongTensor([input_seq.ids]), **generate_kwargs)
-    output_seq = TokSequence(ids=output_ids[0].tolist(), are_ids_encoded=True)
+    # --- Truncate if too long for model
+    if len(input_seq.ids) + len(new_seq.ids) > max_len:
+        input_seq.ids = input_seq.ids[-max_len:]
+        input_seq.tokens = input_seq.tokens[-max_len:]
 
-    # Remove attribute controls from the sequence
-    output_seq = (
-        output_seq[: len(input_seq)] + output_seq[len(input_seq) + len(track[1]) :]
-    )
+    if not seq2seq:
+        input_seq += new_seq
 
-    # Decode BPE ids before getting the associated tokens
+    # --- Generate
+
+    logits_processor = TrackLogitsProcessor(
+            tokenizer.vocab["Track_Start"],
+            tokenizer.vocab["Track_End"],
+            tokenizer.vocab["Bar_None"],
+            tokenizer.vocab["EOS_None"],
+            num_bars_to_generate
+        )
+    logit_processor_list = LogitsProcessorList()
+    logit_processor_list.append(logits_processor)
+
+    if timer:
+        timer.end_preprocessing()
+        timer.start_inference()
+
+    if seq2seq:
+
+        output_ids = model.generate(
+            LongTensor([input_seq.ids]), 
+            decoder_input_ids=new_seq.ids,
+            logits_processor=logit_processor_list,
+            **generate_kwargs
+        )[0].tolist()
+
+    else:
+
+        output_ids = model.generate(
+            LongTensor([input_seq.ids]), 
+            logits_processor=logit_processor_list,
+            **generate_kwargs
+        )[0].tolist()
+
+    if timer:
+        timer.end_inference()
+        timer.start_postprocessing()
+
+    if timer:
+        if seq2seq:
+            timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(new_seq.ids))
+        else:
+            timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
+
+    output_seq = TokSequence(ids=output_ids, are_ids_encoded=True)
+
+    # --- Clean up (remove controls)
+    if not seq2seq:
+        output_start = len(input_seq) - num_attr - 3
+    else:
+        output_start = 0
+    output_seq = output_seq[output_start:]
+    first_generated_bar = np.where(np.array(output_seq.ids) == tokenizer.vocab["Bar_None"])[0][0]
+    output_seq = output_seq[:2] + output_seq[first_generated_bar:]
+
     tokenizer.decode_token_ids(output_seq)
     output_seq.tokens = tokenizer._ids_to_tokens(output_seq.ids)
 
-    # It is expected to have a <TRACK_END> token at the end of the sequence.
+    if output_seq.tokens[-1] == "EOS_None":
+        output_seq = output_seq[:-1] 
+    else:
+        warnings.warn(
+            "Model generation did not terminate with <EOS_NONE>; ignoring.",
+            stacklevel=2,
+        )
+
+
+    # --- Ensure <TRACK_END> closure
     if output_seq.tokens[-1] != "Track_End":
         warnings.warn(
-            "Track generation failed: the model failed to predict a <TRACK_END> token",
+            "Track generation did not terminate with <TRACK_END>; appending manually.",
             stacklevel=2,
         )
         output_seq.ids.append(tokenizer.vocab["Track_End"])
         output_seq.tokens.append("Track_End")
 
-    return tokenizer._tokens_to_score(output_seq)
+    # --- Remove last <BAR_NONE> token if necessary
+    if output_seq.tokens[-2] == "Bar_None":
+        output_seq = output_seq[:-2] + output_seq[-1:]
 
+    # --- Append generated track to the full, uncut score
+    full_tracks_seq.append(output_seq)
+
+    # --- Reconstruct complete score
+    return tokenizer.base_tokenizer._tokens_to_score(full_tracks_seq)
 
 def generate_infilling(
     model: object,
     tokenizer: MMM,
-    inference_config: InferenceConfig,
+    track_idx: int,
+    infill: list[tuple[int, int, list[str]]],
     score: Score,
-    logits_processor: StopLogitsProcessor | None = None,
     generate_kwargs: Mapping | None = None,
+    num_context: int = 8,
+    max_len: int = 2048,
+    timer: InferenceTimer | None = None,
+    seq2seq: bool = False
 ) -> Score:
     """
     Generate a new portion of a ``symusic.Score``.
@@ -157,243 +363,226 @@ def generate_infilling(
         generate_kwargs = {}
     else:
         generate_kwargs["generation_config"].eos_token_id = tokenizer.vocab[
-            "FillBar_End"
+            "EOS_None"
         ]
 
-    tracks_to_infill = inference_config.bars_to_generate.keys()
-
-    start_time = time.time()
-    input_tokens = tokenizer.encode(score, concatenate_track_sequences=False)
-
-    end_time = time.time()
-    print(
-        "[INFO::generate_infilling] Time spent for converting score to tokens: ",
-        end_time - start_time,
-    )
-
-    for track_to_infill in tracks_to_infill:
-        infill_bars(
-            model,
-            tokenizer,
-            track_to_infill,
-            inference_config,
-            input_tokens,
-            logits_processor,
-            generate_kwargs,
-        )
-
-    # Here we use the base tokenizer because output_tokens is a list of TokSequences
-
-    start_time = time.time()
-    result = tokenizer.base_tokenizer._tokens_to_score(input_tokens)
-    end_time = time.time()
-    print(
-        "[INFO::generate_infilling] Time spent for converting tokens to score: ",
-        end_time - start_time,
-    )
-    return result
-
-
-def infill_bars(
-    model: object,
-    tokenizer: MMM,
-    track_idx: int,
-    inference_config: InferenceConfig,
-    tokens: list[TokSequence],
-    logits_processor: StopLogitsProcessor | None = None,
-    generate_kwargs: Mapping | None = None,
-) -> None:
-    """
-    Infill bars for the ''track_idx'' track.
-
-    The tokens are replaced inplace.
-
-    :param model: model used for generation
-    :param tokenizer: MMM tokenizer
-    :param track_idx: index of the track to infill
-    :param inference_config: contains information about which tracks and bars to
-        generate.
-    :param tokens: TokSequence of the track to be infilled
-    :param logits_processor: ``transformers.LogitsProcessor`` used to stop generation
-        when the right number of bars is generated.
-    :param generate_kwargs: keyword arguments to provide to the ``model.generate``
-        method. For Hugging Face models for example, you can provide a
-        ``GenerationConfig`` using this argument.
-    """
-    if not generate_kwargs:
-        generate_kwargs = {}
-
-    # For each set of bars to infill in the track, we generate new content
-    # (We may have, in the same track, non-adjacent sequences of bars. For
-    # each sequence, we do a generation step).
-    for subset_bars_to_infill in inference_config.bars_to_generate[track_idx]:
+    for start_bar_idx, end_bar_idx, attribute_controls in infill:
         # token_start_idx and token_end_idx are the indices of start
         # and end of infilling, when the toksequence is NOT BPE encoded
-        start_time = time.time()
 
-        input_seq, token_start_idx, token_end_idx = _adapt_prompt_for_bar_infilling(
-            tokenizer, track_idx, tokens, subset_bars_to_infill
-        )
+        tokens = tokenizer.encode(score, concatenate_track_sequences=False)
 
-        end_time = time.time()
-        print(
-            "[INFO::infill_bars] Time spent for creating input sequence: ",
-            end_time - start_time,
-        )
+        toksequence_to_infill = TokSequence(are_ids_encoded=False)
 
-        logits_processor.n_bars_to_infill = (
-            subset_bars_to_infill[1] - subset_bars_to_infill[0]
+        times = np.array([event.time for event in tokens[track_idx].events])
+
+        bars_ticks = tokens[track_idx]._ticks_bars
+        num_bars = len(bars_ticks)
+        if DEBUG:
+            print(f"Num bars: {num_bars}")
+        
+        assert start_bar_idx >= 0, f"Invalid infilling start bar index : {start_bar_idx}"
+        assert end_bar_idx <= num_bars, f"Invalid infilling end bar index : {end_bar_idx} (must be leq than {num_bars})"
+        
+        bar_tick_start = bars_ticks[start_bar_idx]
+
+        token_idx_start = np.nonzero(times >= bar_tick_start)[0]
+        token_idx_start = token_idx_start[0]
+
+        context_start_bar = max(start_bar_idx - num_context,0)
+
+        # Context
+        context_token_start_idx = np.nonzero(
+            times >= bars_ticks[context_start_bar]
+        )[0][0]
+
+        # If the first bar is in the context, we remove track_start + program
+        # These will be added seperately
+        if context_start_bar == 0:
+            context_token_start_idx += 2
+
+        if end_bar_idx < num_bars:
+            bar_tick_end = bars_ticks[end_bar_idx]
+
+            token_idx_end = np.nonzero(times >= bar_tick_end)[0][0]
+
+            context_end_bar = min(end_bar_idx + num_context, num_bars)
+
+            if context_end_bar < num_bars:
+                context_token_end_idx = np.nonzero(
+                    times >= bars_ticks[context_end_bar]
+                )[0][0]
+            else:
+                context_token_end_idx = len(tokens[track_idx]) - 1
+        else:
+            context_end_bar = end_bar_idx
+            context_token_end_idx = len(tokens[track_idx].tokens)
+            token_idx_end = context_token_end_idx
+
+        if DEBUG:
+            print(f"Context: bar [{context_start_bar},{context_end_bar}(")
+
+        # Decode BPE tokens: this is necessary to put <INFILL_BAR> tokens
+        # at the right place
+        tokenizer.decode_token_ids(tokens[track_idx])
+
+        track_start_tokens = tokens[track_idx][:2]
+
+        seq_before = (
+            track_start_tokens
+            + tokens[track_idx][context_token_start_idx:token_idx_start]
         )
-        logits_processor.n_attribute_controls = len(subset_bars_to_infill[2])
+        for _ in range(end_bar_idx - start_bar_idx):
+            seq_before.ids.append(tokenizer.vocab["Infill_Bar"])
+            seq_before.tokens.append("Infill_Bar")
+        seq_after = tokens[track_idx][token_idx_end:context_token_end_idx]
+        toksequence_to_infill += seq_before + seq_after
+        toksequence_to_infill.ids.append(tokenizer.vocab["Track_End"])
+        toksequence_to_infill.tokens.append("Track_End")
+
+        # Encode into BPE tokens
+        tokenizer.encode_token_ids(toksequence_to_infill)
+
+        input_seq = TokSequence(are_ids_encoded=True)
+        for i in range(len(tokens)):
+            if i == track_idx:
+                input_seq += toksequence_to_infill
+                continue
+            times = np.array([event.time for event in tokens[i].events])
+            context_token_start_idx = np.nonzero(
+                times >= bars_ticks[context_start_bar]
+            )[0][0]
+            if context_start_bar == 0:
+                context_token_start_idx += 2
+            if context_end_bar < num_bars:
+                context_token_end_idx = np.nonzero(
+                    times >= bars_ticks[context_end_bar]
+                )[0][0]
+            else:
+                context_token_end_idx = len(tokens[i]) - 1
+            track_seq = (
+                tokens[i][:2]
+                + tokens[i][context_token_start_idx:context_token_end_idx]
+                + tokens[i][-1:]
+            )
+            input_seq += track_seq
+
+        new_seq = TokSequence()
+
+        new_seq.ids.append(tokenizer.vocab["FillBar_Start"])
+        new_seq.tokens.append("FillBar_Start")
+
+        new_seq.ids.append(tokenizer.vocab["Bar_None"])
+        new_seq.tokens.append("Bar_None")
+
+        for control in attribute_controls:
+            new_seq.ids.append(tokenizer.vocab[control])
+            new_seq.tokens.append(control)
+
+        if not seq2seq:
+            input_seq += new_seq
+
+        if len(input_seq.ids)> max_len:
+            if DEBUG:
+                print(f"Clipping input sequence by {len(input_seq.ids) - max_len} tokens.")
+            input_seq.ids = input_seq.ids[-max_len:]
+            input_seq.tokens = input_seq.tokens[-max_len:]
+
+        num_bars_to_generate = end_bar_idx - start_bar_idx
+
+        logits_processor = InfillLogitsProcessor(
+            tokenizer.vocab["FillBar_Start"],
+            tokenizer.vocab["FillBar_End"],
+            tokenizer.vocab["Bar_None"],
+            tokenizer.vocab["EOS_None"],
+            num_bars_to_generate
+        )
         logit_processor_list = LogitsProcessorList()
         logit_processor_list.append(logits_processor)
 
-        start_time = time.time()
+        if timer:
+            timer.end_preprocessing()
+            timer.start_inference()
 
-        output_ids = model.generate(
-            LongTensor([input_seq.ids]),
-            logits_processor=logit_processor_list,
-            **generate_kwargs,
-        )[0].numpy()
+        if seq2seq:
 
-        end_time = time.time()
-        print("[INFO::infill_bars] Time spent for generation: ", end_time - start_time)
-        # print("Time spent in logits processor ", logits_processor.total_time)
+            output_ids = model.generate(
+                LongTensor([input_seq.ids]),
+                decoder_input_ids=new_seq.ids,
+                logits_processor=logit_processor_list,
+                **generate_kwargs,
+            )[0].numpy()
 
-        start_time = time.time()
+        else:
+
+            output_ids = model.generate(
+                LongTensor([input_seq.ids]),
+                logits_processor=logit_processor_list,
+                **generate_kwargs,
+            )[0].numpy()
+
+        if timer:
+            timer.end_inference()
+            timer.start_postprocessing()
+
+            if seq2seq:
+                timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(new_seq.ids))
+            else:
+                timer.set_num_tokens(len(input_seq.ids), len(output_ids) - len(input_seq.ids))
+
+        if DEBUG:
+            pretty_print_tokens(tokenizer._ids_to_tokens(output_ids))
+
+        if output_ids[-1] == tokenizer.vocab["EOS_None"]:
+            output_ids = output_ids[:-1] 
+        else:
+            warnings.warn(
+                "Model generation did not terminate with <EOS_NONE>; ignoring.",
+                stacklevel=2,
+            )
+
+        if output_ids[-1] == tokenizer.vocab["FillBar_End"]:
+            output_ids = output_ids[:-1] 
+        else:
+            warnings.warn(
+                "Model generation did not terminate with <FILLBAR_END>; ignoring.",
+                stacklevel=2,
+            )
+
+        # Remove last bar if necesssary
+        if output_ids[-1] == tokenizer.vocab["Bar_None"]:
+            output_ids = output_ids[:-1] 
 
         fill_start_idx = np.where(output_ids == tokenizer.vocab["FillBar_Start"])[0][0]
+
+        first_bar_start = np.where(output_ids[fill_start_idx:] == tokenizer.vocab["Bar_None"])[0][0]
+
+        output_ids = output_ids[fill_start_idx + first_bar_start:]
+
+        bar_none_id = tokenizer.vocab["Bar_None"]
+        num_generated_bars = np.sum(np.array(output_ids) == bar_none_id)
+
+        if num_generated_bars != num_bars_to_generate:
+            warnings.warn(
+                "Model generation did not produce enough bars; completing with empty bars.",
+                stacklevel=2,
+            )
+            output_ids += [bar_none_id] * (num_bars_to_generate - num_generated_bars)
 
         # Here we isolate the generated tokens doing some filtering. In particular,
         # the model may generate some tokens before the first Bar_None token
         generated_tokens = TokSequence(are_ids_encoded=True)
-        generated_tokens.ids = output_ids[
-            fill_start_idx + len(subset_bars_to_infill[2]) + 1 : -1
-        ].tolist()
+        #generated_tokens.ids = output_ids[
+        #    fill_start_idx + len(attribute_controls) + 1 : -1
+        #].tolist()
+        generated_tokens.ids = output_ids.tolist()
         # decode_token_ids doesn't support numpy arrays for ids list
         tokenizer.decode_token_ids(generated_tokens)
-        bar_none_token_idxs = np.where(
-            np.array(generated_tokens.ids) == tokenizer.vocab["Bar_None"]
-        )[0]
-        # bar_none_token_idxs[-1] because we must exclude the last BarNone token,
-        # which is used by the logits processor to stop generation
-        generated_tokens.ids = generated_tokens.ids[
-            bar_none_token_idxs[0] : bar_none_token_idxs[-1]
-        ]
 
         tokenizer.decode_token_ids(tokens[track_idx])
-        tokens[track_idx].ids[token_start_idx:token_end_idx] = generated_tokens.ids
+        tokens[track_idx].ids[token_idx_start:token_idx_end] = generated_tokens.ids
         tokens[track_idx].tokens = tokenizer._ids_to_tokens(tokens[track_idx].ids)
 
-        end_time = time.time()
-        print(
-            "[INFO::infill_bars] Time spend for reconstructing the sequence: ",
-            end_time - start_time,
-        )
+        score = tokenizer.base_tokenizer._tokens_to_score(tokens)
 
-
-def _adapt_prompt_for_bar_infilling(
-    tokenizer: MMM,
-    track_idx: int,
-    tokens: list[TokSequence],
-    subset_bars_to_infill: tuple[int, int, list[str]],
-) -> TokSequence:
-    """
-    Construct the prompt for bar infilling.
-
-    Constructs the prompt to be used as model's input. The sequence should have the
-    "BAR_FILL" format:
-    ``<TRACK_START>...<TRACK_END>...<TRACKS_START>...<INFILL_BAR>...<INFILL_BAR>...
-    <TRACK_END>...<TRACK_START>...<TRACK_END><START_FILL>``
-    We have as many <FILL_IN> tokens as the number of bars we want to infill.
-
-    :param tokenizer: MMM tokenizer
-    :param track_idx: index of the track to infill
-    :param tokens: TokSequence of the track to be infilled
-    :param subset_bars_to_infill: contains the indexes of the first and last bar to
-        infill, plus a list of attribute controls
-    """
-    num_context_bars = 8
-    conditioning_dict = {}
-
-    toksequence_to_infill: TokSequence = TokSequence(are_ids_encoded=False)
-
-    start_bar_idx = subset_bars_to_infill[0]
-    end_bar_idx = subset_bars_to_infill[1]
-
-    bars_ticks = tokens[track_idx]._ticks_bars
-    bar_tick_start = bars_ticks[start_bar_idx]
-    bar_tick_end = bars_ticks[end_bar_idx]
-
-    times = np.array([event.time for event in tokens[track_idx].events])
-
-    token_idx_start = np.nonzero(times >= bar_tick_start)[0]
-    token_idx_start = token_idx_start[0]
-
-    token_idx_end = np.nonzero(times >= bar_tick_end)[0]
-    token_idx_end = token_idx_end[0]
-
-    # Context
-    context_token_start_idx = np.nonzero(
-        times >= bars_ticks[start_bar_idx - num_context_bars]
-    )[0][0]
-    context_token_end_idx = np.nonzero(
-        times >= bars_ticks[end_bar_idx + num_context_bars]
-    )[0][0]
-
-    conditioning_dict[track_idx] = (context_token_start_idx, context_token_end_idx)
-
-    # Decode BPE tokens: this is necessary to put <INFILL_BAR> tokens
-    # at the right place
-    tokenizer.decode_token_ids(tokens[track_idx])
-
-    seq_before = (
-        tokens[track_idx][:2]
-        + tokens[track_idx][context_token_start_idx:token_idx_start]
-    )
-    for _ in range(end_bar_idx - start_bar_idx):
-        seq_before.ids.append(tokenizer.vocab["Infill_Bar"])
-        seq_before.tokens.append("Infill_Bar")
-    seq_after = tokens[track_idx][token_idx_end:context_token_end_idx]
-    toksequence_to_infill += seq_before + seq_after
-    toksequence_to_infill.ids.append(tokenizer.vocab["Track_End"])
-    toksequence_to_infill.tokens.append("Track_End")
-
-    # Encode into BPE tokens
-    tokenizer.encode_token_ids(toksequence_to_infill)
-
-    output_toksequence = TokSequence(are_ids_encoded=True)
-    for i in range(len(tokens)):
-        if i == track_idx:
-            output_toksequence += toksequence_to_infill
-            continue
-        times = np.array([event.time for event in tokens[i].events])
-        try:
-            context_token_start_idx = np.nonzero(
-                times >= bars_ticks[start_bar_idx - num_context_bars]
-            )[0][0]
-            context_token_end_idx = np.nonzero(
-                times >= bars_ticks[end_bar_idx + num_context_bars]
-            )[0][0]
-        except IndexError:
-            continue
-        conditioning_dict[i] = (context_token_start_idx, context_token_end_idx)
-        output_toksequence += (
-            tokens[i][:2]
-            + tokens[i][context_token_start_idx:context_token_end_idx]
-            + tokens[i][-1:]
-        )
-
-    output_toksequence.ids.append(tokenizer.vocab["FillBar_Start"])
-    output_toksequence.tokens.append("FillBar_Start")
-
-    attribute_controls = subset_bars_to_infill[2]
-    for control in attribute_controls:
-        output_toksequence.ids.append(tokenizer.vocab[control])
-        output_toksequence.tokens.append(control)
-
-    # with open("tokens.txt", "w") as file:
-    #    for token in output_toksequence.tokens:
-    #        file.write(token + "\n")
-
-    return output_toksequence, token_idx_start, token_idx_end
+    return score

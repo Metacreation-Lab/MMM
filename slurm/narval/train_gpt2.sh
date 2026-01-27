@@ -7,19 +7,20 @@
 #SBATCH --output=logs/train-gpt2.out
 #SBATCH --error=logs/train-gpt2_err.out
 #SBATCH --account=def-pasquier
-#SBATCH --mail-user=raa60@sfu.ca # Default mail
+#SBATCH --mail-user=paul_triana@sfu.ca # Default mail
+#SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --nodes=1            # total nb of nodes
 #SBATCH --ntasks-per-node=1  # nb of tasks per node
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=10   # nb of CPU cores per task
-#SBATCH --mem=100G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=16   # nb of CPU cores per task
+#SBATCH --mem=256G
+#SBATCH --time=3-00:00:00
 
 # Define args
 MODEL_TRAIN_ARGS=" \
     --deepspeed slurm/ds_config.json \
-    --per-device-train-batch-size 12 \
-    --per-device-eval-batch-size 18 \
+    --per-device-train-batch-size 32 \
+    --per-device-eval-batch-size 64 \
     --model MMM_gpt2 \
     "
 
@@ -69,7 +70,7 @@ export LAUNCHER="torchrun \
     "
 
 # Load the python environment
-module load gcc arrow/17.0.0  # needed since arrow can't be installed in the venv via pip
+module load gcc arrow/17.0.0 cuda # needed since arrow can't be installed in the venv via pip
 source .venv/bin/activate
 
 # Run the training

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset, load_dataset, DatasetDict
 from miditok import TokenizerConfig
 from miditok.constants import SCORE_LOADING_EXCEPTION
 from miditok.pytorch_data import DataCollator
@@ -37,6 +37,7 @@ from .constants import (
     DATA_AUGMENTATION_OFFSETS,
     DATALOADER_NUM_WORKERS,
     DATALOADER_PERSISTENT_WORKERS,
+    DATALOADER_PIN_MEMORY,
     DDP_BUCKET_CAP_MB,
     DDP_FIND_UNUSED_PARAMETERS,
     DEEPSPEED,
@@ -46,6 +47,7 @@ from .constants import (
     ETA_CUTOFF,
     EVAL_ACCUMULATION_STEPS,
     EVAL_STRATEGY,
+    EVAL_STEPS,
     FEEDFORWARD_SIZE,
     FP16,
     FP16_EVAL,
@@ -101,6 +103,7 @@ from .constants import (
     USE_MPS,
     VALID_DELAY,
     VOCAB_SIZE,
+    VOCAB_SIZE_SMALL,
     WARMUP_RATIO,
     WEIGHT_DECAY,
 )
@@ -110,7 +113,8 @@ if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
 
-attn_implem = "flash_attention_2" if "flash_attn" in sys.modules else None
+#attn_implem = "flash_attention_2" if "flash_attn" in sys.modules else None
+attn_implem = None
 dtype = torch.bfloat16 if BF16 else torch.float16 if FP16 else torch.float32
 
 
@@ -164,7 +168,7 @@ class MMM(Baseline):
             try:
                 return load_dataset(
                     str(self.dataset_path),
-                    "all-instruments-with-drums",
+                    self.version,
                     subsets=self.data_config.subsets_names,
                     trust_remote_code=True,
                 )
@@ -183,20 +187,81 @@ class MMM(Baseline):
 
         :return: A dictionary containing the train, validation, and test datasets.
         """
-        dataset_path = Path("../data/GigaMIDI")
+        #dataset_path = Path(os.getenv("SCRATCH"), "data", self.dataset)
+        dataset_path = self.dataset_path
+        version = self.version
+
+        print(dataset_path / version)
 
         try:
             # Load the datasets using load_dataset
-            return load_dataset(
-                "parquet",
-                data_files={
-                    "train": dataset_path / "all-instruments-with-drums"
-                    "/train.parquet",
-                    "validation": dataset_path / "all-instruments-with-drums"
-                    "/validation.parquet",
-                    "test": dataset_path / "all-instruments-with-drums/test.parquet",
-                },
-            )
+            if version == "v1.0.0":
+                dataset = load_dataset(
+                    "parquet",
+                    data_files={
+                        "train": str(dataset_path /
+                                    version / "train.parquet"),
+                        "validation": str(dataset_path /
+                                    version / "validation.parquet"),
+                        "test": str(dataset_path /
+                                    version / "test.parquet"),
+                    },
+                )
+            elif version == "v1.1.0" or version == "v1.2.0" or version == "v0.0.0" or version == "v1.0.1":
+                dataset = load_dataset(
+                    "parquet",
+                    data_files={
+                        "train": str(dataset_path / 
+                                    version / "train" / "*.parquet"),
+                        "validation": str(dataset_path / 
+                                    version / "validation" / "*.parquet"),
+                        "test": str(dataset_path / 
+                                    version / "test" / "*.parquet"),
+                    },
+                )
+            elif version == "v2.0.0":
+                '''
+                train_files = list((dataset_path / version / "train").rglob("*.mid"))
+                val_files = list((dataset_path / version / "validation").rglob("*.mid"))
+                test_files = list((dataset_path / version / "test").rglob("*.mid"))
+
+                dataset = load_dataset(
+                    "binary",
+                    data_files={
+                        "train": [str(p) for p in train_files],
+                        "validation": [str(p) for p in val_files],
+                        "test": [str(p) for p in test_files],
+                    }
+                )
+                '''
+
+                train_files = list((dataset_path / version / "train").rglob("*.mid"))
+                val_files = list((dataset_path / version / "validation").rglob("*.mid"))
+                test_files = list((dataset_path / version / "test").rglob("*.mid"))
+
+                data_files = {
+                    "train": [str(p) for p in train_files],
+                    "validation": [str(p) for p in val_files],
+                    "test": [str(p) for p in test_files]
+                }
+
+                dataset = load_dataset(
+                    "namespace/GigaMIDI",
+                    data_files
+                )
+
+                print(len(dataset["train"]))
+            else:
+                raise RuntimeError(f"Version {self.version} is not supported by GigaMIDI!")
+            clip_percent = None
+            if clip_percent is not None:
+                if not (0 < clip_percent <= 1):
+                    raise ValueError("clip_percent must be between 0 and 1")
+                for split in dataset:
+                    n = int(len(dataset[split]) * clip_percent)
+                    dataset[split] = dataset[split].select(range(n))
+                    print(f"{split} clipped to {n} samples ({clip_percent*100:.1f}%)")
+            return dataset
         except PermissionError:
             # Handle potential permission errors
             path = os.getenv("SLURM_TMPDIR")
@@ -244,7 +309,6 @@ class MMM(Baseline):
 
         :param dataset: ``datasets.Dataset`` to process.
         """
-        print(dataset[0])
         return dataset.filter(
             lambda ex: is_score_valid(
                 ex["music"], MIN_NUM_BARS_FILE_VALID, MIN_NUM_NOTES_FILE_VALID
@@ -288,6 +352,7 @@ training_config_kwargs = {
     "do_eval": True,
     "do_predict": False,
     "eval_strategy": EVAL_STRATEGY,
+    "eval_steps": EVAL_STEPS,
     "per_device_train_batch_size": BATCH_SIZE_PER_DEVICE_TRAIN,
     "per_device_eval_batch_size": BATCH_SIZE_PER_DEVICE_VALID,
     "gradient_accumulation_steps": GRAD_ACC_STEPS,
@@ -325,6 +390,7 @@ training_config_kwargs = {
     "ddp_find_unused_parameters": DDP_FIND_UNUSED_PARAMETERS,
     "ddp_bucket_cap_mb": DDP_BUCKET_CAP_MB,
     "dataloader_persistent_workers": DATALOADER_PERSISTENT_WORKERS,
+    "dataloader_pin_memory": DATALOADER_PIN_MEMORY,
     "push_to_hub": PUSH_TO_HF_HUB,
     "deepspeed": DEEPSPEED,  # set with argparse
     "hub_strategy": HUB_STRATEGY,
@@ -344,6 +410,10 @@ data_config = DataConfig(
 tok_config = TokenizationConfig(
     "MMM", TokenizerConfig(**deepcopy(TOKENIZER_PARAMS)), VOCAB_SIZE
 )
+
+tok_config_short = TokenizationConfig(
+    "MMM", TokenizerConfig(**deepcopy(TOKENIZER_PARAMS)), VOCAB_SIZE_SMALL
+)
 mistral_config = MistralConfig(
     vocab_size=VOCAB_SIZE,
     hidden_size=EMBEDDING_SIZE,
@@ -358,6 +428,16 @@ mistral_config = MistralConfig(
 )
 gpt2_config = GPT2Config(
     vocab_size=VOCAB_SIZE,
+    n_positions=MAX_POSITION_EMBEDDINGS,
+    n_embd=EMBEDDING_SIZE,
+    n_layer=NUM_LAYERS,
+    n_head=NUM_ATTENTION_HEADS,
+    n_inner=FEEDFORWARD_SIZE,
+    attn_implementation=attn_implem,
+    torch_dtype=dtype,
+)
+gpt2_config_no_bpe = GPT2Config(
+    vocab_size=VOCAB_SIZE_SMALL,
     n_positions=MAX_POSITION_EMBEDDINGS,
     n_embd=EMBEDDING_SIZE,
     n_layer=NUM_LAYERS,
@@ -415,6 +495,88 @@ mmm_gpt2 = MMM(
     deepcopy(generation_config),
 )
 
+mmm_gpt2_short = MMM(
+    "MMM_gpt2_short",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config_short),
+    deepcopy(gpt2_config_no_bpe),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+)
+
+mmm_gpt2_meta_short = MMM(
+    "MMM_gpt2_meta_short",
+    "MetaMIDI",
+    SEED,
+    deepcopy(tok_config_short),
+    deepcopy(gpt2_config_no_bpe),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v1.0.1"
+)
+
+mmm_gpt2_4 = MMM(
+    "MMM_gpt2_4",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+)
+
+mmm_gpt2_v0 = MMM(
+    "MMM_gpt2_v0",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v0.0.0"
+)
+
+mmm_gpt2_midi = MMM(
+    "MMM_gpt2_midi",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v2.0.0"
+)
+
+mmm_gpt2_v2 = MMM(
+    "MMM_gpt2_v2",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config),
+    deepcopy(gpt2_config),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v1.2.0"
+)
+
+mmm_gpt2_v2_short = MMM(
+    "MMM_gpt2_v2_short",
+    "GigaMIDI",
+    SEED,
+    deepcopy(tok_config_short),
+    deepcopy(gpt2_config_no_bpe),
+    deepcopy(training_config_kwargs),
+    deepcopy(data_config),
+    deepcopy(generation_config),
+    "v1.2.0"
+)
+
 mmm_t5 = MMM(
     "MMM_t5",
     "GigaMIDI",
@@ -427,4 +589,4 @@ mmm_t5 = MMM(
 )
 mmm_t5.seq2seq = True
 
-baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2]}
+baselines = {baseline.name: baseline for baseline in [mmm_mistral, mmm_t5, mmm_gpt2, mmm_gpt2_v2, mmm_gpt2_v2_short, mmm_gpt2_v0, mmm_gpt2_4, mmm_gpt2_midi, mmm_gpt2_short, mmm_gpt2_meta_short]}

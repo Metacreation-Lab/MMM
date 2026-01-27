@@ -12,7 +12,8 @@ if __name__ == "__main__":
 
     # Parse arguments for training params / model size
     parser = ArgumentParser(description="Model training script")
-    parser.add_argument("--model", type=str, default="MMM_mistral")
+    parser.add_argument("--model", type=str, default="MMM_gpt2")
+    parser.add_argument("--left_padding", action="store_true")
     for param in signature(Seq2SeqTrainingArguments).parameters.values():
         key = param.name.replace("_", "-")
         if param.annotation is bool:
@@ -26,16 +27,10 @@ if __name__ == "__main__":
 
     # Identify model to train and tweak its training configuration
     baseline = baselines[args.pop("model")]
+    left_padding = args.pop("left_padding")
     for arg, value in args.items():
         if value is not None:
             baseline.training_config_kwargs[arg] = value
 
-    # TODO introduce metrics: measure effectiveness of attribute controls
-    """from metrics import Metrics, apply_argmax_to_preds
-    metrics_names = {
-        "accuracy": (apply_argmax_to_preds, {}, {}),
-    }
-    # Metrics(metrics_names, exp_id=exp_.name)"""
-
     # Training the model
-    whole_training_process(baseline, do_test=False)
+    whole_training_process(baseline, do_test=False, pad_on_left=left_padding)

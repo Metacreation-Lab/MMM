@@ -21,15 +21,14 @@ class InferenceConfig:
         the new tracks
     """
 
+    context_length: int = 4
     bars_to_generate: dict[int, list[tuple[int, int, list[str]]]] | None = None
     new_tracks: list[tuple[int, list[str]]] | None = None
-    context_length: int = 4
     autoregressive: bool = False
     infilling: bool = False
 
     def __post_init__(self) -> None:
         """Check that the Inference config is consistent."""
-        self.context_tracks = self.bars_to_generate.keys()
 
         if len(self.bars_to_generate) > 0:
             self.infilling = True
